@@ -226,42 +226,70 @@ class Consciousness
     private function generateAndStoreSentences()
     {
         // Sık kullanılan kelimeleri al
-        $frequentWords = AIData::where('frequency', '>', 5)
+        $frequentWords = AIData::where('frequency', '>', 3)
             ->inRandomOrder()
-            ->limit(50)
+            ->limit(100)
             ->get();
             
         if ($frequentWords->isEmpty()) {
             return;
         }
         
-        // 3 cümle oluştur
-        for ($i = 0; $i < 3; $i++) {
-            // İki farklı cümle üretim yöntemi kullan
-            if ($i % 2 == 0) {
-                // Standart metod
-                $sentence = $this->generateSentence($frequentWords);
-            } else {
-                // İlişkisel metod
-                $startWord = $frequentWords->random()->word;
-                $sentence = $this->wordRelations->generateSentenceWithRelations($startWord, $this->minWordCount, $this->maxWordCount);
+        // 5 cümle oluştur (3 yerine daha fazla)
+        for ($i = 0; $i < 5; $i++) {
+            // Dört farklı cümle üretim yöntemi kullan
+            $sentenceMethod = $i % 4;
+            $sentence = '';
+            
+            switch ($sentenceMethod) {
+                case 0:
+                    // Standart metod
+                    $sentence = $this->generateSentence($frequentWords);
+                    break;
+                case 1:
+                    // İlişkisel metod
+                    $startWord = $frequentWords->random()->word;
+                    $sentence = $this->wordRelations->generateSentenceWithRelations($startWord, $this->minWordCount, $this->maxWordCount);
+                    break;
+                case 2:
+                    // Kavramsal metod
+                    $concept = $frequentWords->random()->word;
+                    $sentence = $this->wordRelations->generateConceptualSentence($concept, $this->minWordCount, $this->maxWordCount);
+                    break;
+                case 3:
+                    // Duygusal bağlam metodu
+                    $emotion = array_rand(['happy', 'sad', 'neutral', 'curious']);
+                    $startWord = $frequentWords->random()->word;
+                    $sentence = $this->generateEmotionalSentence($startWord, $emotion);
+                    break;
             }
             
             if (!empty($sentence)) {
                 // İlk kelimeyi başlangıç kelimesi olarak kullan
                 $firstWord = explode(' ', $sentence)[0];
                 
+                // Cümleyi analiz et ve kategori/bağlam belirle
+                $category = $this->determineSentenceCategory($sentence);
+                $context = $this->determineSentenceContext($sentence);
+                
                 // Cümleyi veritabanına kaydet
                 AIData::updateOrCreate(
                     ['word' => $firstWord],
                     [
                         'sentence' => $sentence,
-                        'category' => 'generated',
-                        'context' => 'Consciousness tarafından oluşturuldu',
+                        'category' => $category,
+                        'context' => $context,
                         'language' => 'tr',
-                        'confidence' => 0.7
+                        'confidence' => 0.7,
+                        'emotional_context' => json_encode([
+                            'emotion' => $sentenceMethod == 3 ? $emotion : 'neutral',
+                            'intensity' => 0.6
+                        ])
                     ]
                 );
+                
+                // Cümle içindeki kelime ilişkilerini de öğren
+                $this->wordRelations->learnFromContextualData($firstWord, ['category' => $category, 'context' => $context], $sentence);
                 
                 $this->logActivity('Yeni cümle oluşturuldu: ' . $sentence);
                 
@@ -269,6 +297,102 @@ class Consciousness
                 $this->internalState['learned_rules']++;
             }
         }
+    }
+    
+    /**
+     * Verilen duygu durumuna göre cümle oluştur
+     */
+    private function generateEmotionalSentence($startWord, $emotion)
+    {
+        // Duygu durumuna uygun kelimeler
+        $emotionalWords = [
+            'happy' => ['güzel', 'harika', 'mutlu', 'neşeli', 'sevgi', 'iyi', 'başarı'],
+            'sad' => ['üzgün', 'kötü', 'zor', 'acı', 'mutsuz', 'yalnız'],
+            'neutral' => ['normal', 'ılımlı', 'dengeli', 'sakin', 'ölçülü'],
+            'curious' => ['merak', 'ilginç', 'düşündürücü', 'sorgu', 'araştırma']
+        ];
+        
+        $sentence = [$startWord];
+        $targetLength = rand($this->minWordCount, $this->maxWordCount);
+        
+        // İlgili duygu kelimelerini al ya da varsayılan olarak neutral kullan
+        $relevantWords = $emotionalWords[$emotion] ?? $emotionalWords['neutral'];
+        
+        // Önce ilgili duygu kelimelerinden ekle
+        if (count($sentence) < $targetLength && !empty($relevantWords)) {
+            $emotionWord = $relevantWords[array_rand($relevantWords)];
+            if (!in_array($emotionWord, $sentence)) {
+                $sentence[] = $emotionWord;
+            }
+        }
+        
+        // Cümleyi tamamla
+        while (count($sentence) < $targetLength) {
+            $lastWord = $sentence[count($sentence) - 1];
+            
+            // Son kelimeyle ilişkili kelimeleri bul
+            $nextWords = $this->findStronglyConnectedWords($lastWord, AIData::all());
+            
+            if (empty($nextWords)) {
+                // İlişkili kelime yoksa duygu durumuna göre ya da rastgele kelime ekle
+                if (rand(0, 1) == 1 && !empty($relevantWords)) {
+                    $nextWord = $relevantWords[array_rand($relevantWords)];
+                } else {
+                    $nextWord = AIData::inRandomOrder()->first()->word;
+                }
+            } else {
+                $nextWord = $nextWords[array_rand($nextWords)];
+            }
+            
+            // Tekrarları önle
+            if (!in_array($nextWord, $sentence)) {
+                $sentence[] = $nextWord;
+            }
+        }
+        
+        // Cümleyi birleştir ve ilk harfi büyük yap
+        $sentenceText = implode(' ', $sentence);
+        $sentenceText = ucfirst($sentenceText) . '.';
+        
+        return $sentenceText;
+    }
+    
+    /**
+     * Cümlenin kategorisini belirle
+     */
+    private function determineSentenceCategory($sentence)
+    {
+        // Kategori belirlemek için anahtar kelimeler
+        $categoryKeywords = [
+            'greeting' => ['merhaba', 'selam', 'günaydın', 'iyi günler', 'nasılsın'],
+            'question' => ['mi', 'mı', 'mu', 'mü', 'ne', 'neden', 'nasıl', 'kim', 'hangi'],
+            'statement' => ['dır', 'dir', 'tır', 'tir', 'olarak', 'şeklinde'],
+            'technology' => ['bilgisayar', 'yapay', 'zeka', 'yazılım', 'internet', 'teknoloji'],
+            'emotion' => ['mutlu', 'üzgün', 'kızgın', 'sevinçli', 'mutsuz', 'neşeli'],
+            'education' => ['öğren', 'eğitim', 'okul', 'ders', 'bilgi'],
+            'daily' => ['bugün', 'yarın', 'hava', 'yemek', 'uyku', 'sabah', 'akşam']
+        ];
+        
+        $sentence = strtolower($sentence);
+        
+        foreach ($categoryKeywords as $category => $keywords) {
+            foreach ($keywords as $keyword) {
+                if (strpos($sentence, $keyword) !== false) {
+                    return $category;
+                }
+            }
+        }
+        
+        // Varsayılan kategori
+        return 'generated';
+    }
+    
+    /**
+     * Cümlenin bağlamını belirle
+     */
+    private function determineSentenceContext($sentence)
+    {
+        return 'Consciousness tarafından ' . now()->format('Y-m-d') . ' tarihinde oluşturuldu';
     }
     
     /**

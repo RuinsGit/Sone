@@ -651,250 +651,289 @@ class WordRelations
     }
     
     /**
-     * Verilen kavramla ilgili anlamlı bir cümle oluştur
+     * Bir kavram hakkında anlamlı cümle üret
      */
     public function generateConceptualSentence($concept, $minLength = 3, $maxLength = 12)
     {
-        if (!$this->isValidWord($concept)) {
+        if (empty($concept) || !$this->isValidWord($concept)) {
             return '';
         }
         
-        try {
-            // Kavramın tanımını al
-            $definition = $this->getDefinition($concept);
-            
-            // Cümle kalıpları
-            $sentenceTemplates = [
-                "%concept%, %definition%",
-                "%concept% aslında %definition%",
-                "%concept% kavramı %definition%",
-                "Bildiğim kadarıyla %concept%, %definition%",
-                "%concept% demek, %definition% demektir"
-            ];
-            
-            // Eğer tanım varsa ve uzunsa, farklı bir cümle olarak kullan
-            if (!empty($definition) && strlen($definition) > 10) {
-                // Tanımın ilk harfini küçült
-                $definition = lcfirst($definition);
-                
-                // Rastgele bir kalıp seç ve cümle oluştur
-                $template = $sentenceTemplates[array_rand($sentenceTemplates)];
-                $sentence = str_replace(["%concept%", "%definition%"], [$concept, $definition], $template);
-                
-                // İlk harfi büyük yap
-                return ucfirst($sentence);
+        // Kavram için tanım kontrolü
+        $definition = $this->getDefinition($concept);
+        
+        // Kavramla ilişkili kelimeleri al
+        $relations = $this->getRelatedWords($concept, 0.3);
+        $synonyms = $this->getSynonyms($concept);
+        
+        // İlişkili kavramlardan bir alt kavram seç
+        $subConcepts = [];
+        if (!empty($relations)) {
+            foreach ($relations as $word => $info) {
+                $subConcepts[] = $word;
             }
-            
-            // İlişkili kelimeleri al (ağırlığı 0.2'den büyük olanlar)
-            $relatedWords = $this->getRelatedWords($concept, 0.2);
-            
-            // Yeterli ilişkili kelime yoksa minimum gereksinimi azalt veya boş dön
-            if (count($relatedWords) < 2) {
-                $relatedWords = $this->getRelatedWords($concept, 0.0); // Tüm ilişkili kelimeleri al
-                
-                if (count($relatedWords) < 1) {
-                    return '';
-                }
-            }
-            
-            // İlişki tiplerine göre kelimeleri ayır
-            $synonyms = [];
-            $antonyms = [];
-            $associations = [];
-            
-            foreach ($relatedWords as $word => $info) {
-                if ($info['type'] === 'synonym') {
-                    $synonyms[$word] = $info['strength'];
-                } else if ($info['type'] === 'antonym') {
-                    $antonyms[$word] = $info['strength'];
-                } else {
-                    $associations[$word] = $info['strength'];
-                }
-            }
-            
-            // Cümle oluşturma stratejileri
-            
-            // 1. Strateji: Eş anlamlılar varsa
-            if (!empty($synonyms)) {
-                $synonymList = array_keys($synonyms);
-                shuffle($synonymList);
-                $selectedSynonyms = array_slice($synonymList, 0, min(2, count($synonymList)));
-                
-                $templates = [
-                    "%concept% kelimesi %synonyms% anlamına gelir.",
-                    "%concept% sözcüğü ile %synonyms% aynı anlama gelir.",
-                    "%concept% ve %synonyms% benzer kavramlardır.",
-                    "%concept% dendiğinde %synonyms% da anlaşılabilir."
-                ];
-                
-                $template = $templates[array_rand($templates)];
-                $synText = implode(' ve ', $selectedSynonyms);
-                $sentence = str_replace(["%concept%", "%synonyms%"], [$concept, $synText], $template);
-                
-                return ucfirst($sentence);
-            }
-            
-            // 2. Strateji: Zıt anlamlılar varsa
-            if (!empty($antonyms)) {
-                $antonymList = array_keys($antonyms);
-                shuffle($antonymList);
-                $selectedAntonyms = array_slice($antonymList, 0, min(2, count($antonymList)));
-                
-                $templates = [
-                    "%concept% kelimesinin zıt anlamı %antonyms% olabilir.",
-                    "%concept% ve %antonyms% birbirine zıt kavramlardır.",
-                    "%concept% kelimesinin karşıtı %antonyms% olarak düşünülebilir.",
-                    "%antonyms% kavramı, %concept% kavramının tersidir."
-                ];
-                
-                $template = $templates[array_rand($templates)];
-                $antText = implode(' ve ', $selectedAntonyms);
-                $sentence = str_replace(["%concept%", "%antonyms%"], [$concept, $antText], $template);
-                
-                return ucfirst($sentence);
-            }
-            
-            // 3. Strateji: İlişkili kelimeler varsa
-            if (!empty($associations)) {
-                $assocList = array_keys($associations);
-                shuffle($assocList);
-                $selectedAssocs = array_slice($assocList, 0, min(3, count($assocList)));
-                
-                $templates = [
-                    "%concept% denince akla %associations% gelir.",
-                    "%concept% kavramı %associations% ile ilişkilidir.",
-                    "%concept% ile %associations% arasında bağlantı vardır.",
-                    "%concept% konuşulduğunda genellikle %associations% da konuşulur.",
-                    "Genellikle %concept% ve %associations% bir arada düşünülür."
-                ];
-                
-                $template = $templates[array_rand($templates)];
-                
-                // Bağlaçlarla daha doğal bir metin oluştur
-                if (count($selectedAssocs) == 1) {
-                    $assocText = $selectedAssocs[0];
-                } else if (count($selectedAssocs) == 2) {
-                    $assocText = $selectedAssocs[0] . ' ve ' . $selectedAssocs[1];
-                } else {
-                    $lastIndex = count($selectedAssocs) - 1;
-                    $assocText = implode(', ', array_slice($selectedAssocs, 0, $lastIndex));
-                    $assocText .= ' ve ' . $selectedAssocs[$lastIndex];
-                }
-                
-                $sentence = str_replace(["%concept%", "%associations%"], [$concept, $assocText], $template);
-                
-                return ucfirst($sentence);
-            }
-            
-            // 4. Strateji: Rastgele bir cümle oluştur (yeterli kelime varsa)
-            // Cümle için kullanılacak kelimeleri seç
-            $allRelatedWords = array_keys($relatedWords);
-            if (count($allRelatedWords) >= 2) {
-                shuffle($allRelatedWords);
-                $selectedWords = array_slice($allRelatedWords, 0, min(3, count($allRelatedWords)));
-                
-                $templates = [
-                    "%concept% bağlamında %words% önemli kavramlardır.",
-                    "%concept% dünyasında %words% sık rastlanan terimlerdir.",
-                    "%concept% hakkında konuşurken %words% kavramları da akılda tutulmalıdır.",
-                    "%concept% ile %words% birbirleriyle ilişkilidir."
-                ];
-                
-                $template = $templates[array_rand($templates)];
-                
-                // Kelimeleri bağlaçlarla birleştir
-                if (count($selectedWords) == 1) {
-                    $wordsText = $selectedWords[0];
-                } else if (count($selectedWords) == 2) {
-                    $wordsText = $selectedWords[0] . ' ve ' . $selectedWords[1];
-                } else {
-                    $lastIndex = count($selectedWords) - 1;
-                    $wordsText = implode(', ', array_slice($selectedWords, 0, $lastIndex));
-                    $wordsText .= ' ve ' . $selectedWords[$lastIndex];
-                }
-                
-                $sentence = str_replace(["%concept%", "%words%"], [$concept, $wordsText], $template);
-                
-                return ucfirst($sentence);
-            }
-            
-            // Hiçbir strateji çalışmazsa boş dön
-            return '';
-            
-        } catch (\Exception $e) {
-            Log::error('Cümle oluşturma hatası: ' . $e->getMessage());
-            return '';
         }
+        
+        // Eş anlamlıları ekle
+        foreach ($synonyms as $word => $strength) {
+            if (!in_array($word, $subConcepts)) {
+                $subConcepts[] = $word;
+            }
+        }
+        
+        // Veritabanından ilişkili kelimeler çek
+        try {
+            $dbRelations = WordRelation::where('word', $concept)
+                ->where('relation_type', 'association')
+                ->where('strength', '>', 0.2)
+                ->limit(10)
+                ->get();
+                
+            foreach ($dbRelations as $relation) {
+                if (!in_array($relation->related_word, $subConcepts)) {
+                    $subConcepts[] = $relation->related_word;
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Kavram ilişkili kelime hatası: ' . $e->getMessage());
+        }
+        
+        // Türkçe dil kurallarına uygun olarak cümle oluştur
+        $sentence = [];
+        
+        // Kavramın kendisi ile başla
+        $sentence[] = $concept;
+        
+        // Cümleyi oluşturmak için gereken bağlaçlar ve yapılar
+        $connectors = ['ve', 'ile', 'için', 'gibi', 'olarak', 'sayesinde', 'nedeniyle', 'dolayısıyla'];
+        $verbs = ['vardır', 'oluşur', 'sağlar', 'içerir', 'bulunur', 'görülür', 'yapılır', 'edilir', 'olur'];
+        $ending = ['dir', 'dır', 'tir', 'tır', 'dur', 'dür'];
+        $adjectives = ['güzel', 'önemli', 'değerli', 'gerekli', 'yararlı', 'etkili', 'muhteşem'];
+        
+        // İlişkili kelime yoksa definition'dan kelimeler kullan
+        if (empty($subConcepts) && !empty($definition)) {
+            $words = explode(' ', $definition);
+            foreach ($words as $word) {
+                $word = trim($word, '.,;:?!');
+                if (strlen($word) > 3 && !in_array($word, $sentence)) {
+                    $subConcepts[] = $word;
+                }
+            }
+        }
+        
+        // Hala yoksa rasgele veri ekle
+        if (empty($subConcepts)) {
+            $subConcepts = ['önemli', 'yararlı', 'değerli', 'gerekli'];
+        }
+        
+        // Kavram hakkında anlamlı bir cümle oluştur
+        $targetLength = mt_rand($minLength, $maxLength);
+        
+        // Önce bir sıfat ekle (50% olasılık)
+        if (count($sentence) < $targetLength && mt_rand(0, 1) == 1) {
+            $adjective = $adjectives[array_rand($adjectives)];
+            if (!in_array($adjective, $sentence)) {
+                $sentence[] = $adjective;
+            }
+        }
+        
+        // Alt kavramları ekle
+        while (count($sentence) < $targetLength - 2 && !empty($subConcepts)) {
+            // Bir bağlaç ekle
+            if (count($sentence) < $targetLength && mt_rand(0, 2) == 1) {
+                $connector = $connectors[array_rand($connectors)];
+                if (!in_array($connector, $sentence)) {
+                    $sentence[] = $connector;
+                }
+            }
+            
+            // Rasgele bir alt kavram seç
+            $nextWord = $subConcepts[array_rand($subConcepts)];
+            
+            // Tekrarları önle
+            if (!in_array($nextWord, $sentence) && $this->isValidWord($nextWord)) {
+                $sentence[] = $nextWord;
+            }
+            
+            // Kullanılan alt kavramı kaldır
+            $subConcepts = array_diff($subConcepts, [$nextWord]);
+            
+            if (empty($subConcepts)) {
+                break;
+            }
+        }
+        
+        // Fiil ekle
+        if (count($sentence) < $targetLength) {
+            $verb = $verbs[array_rand($verbs)];
+            $sentence[] = $verb;
+        }
+        
+        // Tanım varsa ve cümle hala kısa ise, tanımdan birkaç kelime ekle
+        if (count($sentence) < $minLength && !empty($definition)) {
+            $defWords = explode(' ', $definition);
+            $selected = array_slice($defWords, 0, $minLength - count($sentence));
+            
+            foreach ($selected as $word) {
+                if (!in_array($word, $sentence) && strlen($word) > 2) {
+                    $sentence[] = $word;
+                }
+            }
+        }
+        
+        // Cümleyi düzgün bir şekilde birleştir
+        $result = implode(' ', $sentence);
+        
+        // Cümlenin ilk harfini büyüt
+        $result = ucfirst($result);
+        
+        // Cümle sonuna nokta ekle
+        if (substr($result, -1) != '.') {
+            $result .= '.';
+        }
+        
+        // Gereksiz boşlukları temizle
+        $result = preg_replace('/\s+/', ' ', $result);
+        
+        // Noktalama işaretlerinden önceki boşlukları temizle
+        $result = preg_replace('/\s+\./', '.', $result);
+        
+        return $result;
     }
     
     /**
-     * İlişkiler kullanarak cümle oluştur
+     * Kelimelerin ilişkilerini kullanarak bir cümle üret
      */
     public function generateSentenceWithRelations($startWord, $minLength = 3, $maxLength = 12)
     {
-        if (!$this->isValidWord($startWord)) {
+        if (empty($startWord) || !$this->isValidWord($startWord)) {
             return '';
         }
         
-        try {
-            // Cümleyi başlat
-            $sentence = [$startWord];
-            $usedWords = [$startWord];
+        $sentence = [$startWord];
+        $usedWords = [$startWord];
+        $targetLength = mt_rand($minLength, $maxLength);
+        
+        // Türkçe cümle yapısı için bağlaçlar ve fiiller
+        $connectors = ['ve', 'ile', 'için', 'gibi', 'olarak', 'sayesinde'];
+        $verbs = ['vardır', 'oluşur', 'sağlar', 'içerir', 'bulunur', 'görülür'];
+        
+        // Cümleyi ilişkili kelimelerle oluştur
+        while (count($sentence) < $targetLength) {
+            $lastWord = $sentence[count($sentence) - 1];
             
-            // Hedef uzunluğa ulaşana kadar kelime ekle
-            while (count($sentence) < $maxLength) {
-                // Son kelimeyi al
-                $lastWord = $sentence[count($sentence) - 1];
-                
-                // Son kelimeyle ilişkili kelimeleri al
-                $relatedWords = $this->getRelatedWords($lastWord, 0.3);
-                
-                // İlişkili kelime yoksa döngüyü bitir
-                if (empty($relatedWords)) {
-                    break;
-                }
-                
-                // İlişkili kelimeleri ağırlıklarına göre sırala
-                $weightedWords = [];
-                foreach ($relatedWords as $word => $info) {
-                    // Daha önce kullanılmamış kelimeleri tercih et
+            // Eğer son kelime bir bağlaç veya fiil ise, herhangi bir kelime ekleyebiliriz
+            $isConnector = in_array($lastWord, $connectors);
+            $isVerb = in_array($lastWord, $verbs);
+            
+            // İlişkili kelimeleri bul
+            $nextWordCandidates = [];
+            
+            // Son kelimeyle ilişkili kelimeleri ekle
+            if (!$isConnector && !$isVerb) {
+                // Önce eş anlamlılar
+                $synonyms = $this->getSynonyms($lastWord);
+                foreach ($synonyms as $word => $strength) {
                     if (!in_array($word, $usedWords)) {
-                        $weight = $info['strength'];
-                        if ($info['type'] === 'synonym') $weight *= 1.5;
-                        if ($info['type'] === 'antonym') $weight *= 0.8;
-                        $weightedWords[$word] = $weight;
+                        $nextWordCandidates[$word] = $strength;
                     }
                 }
                 
-                // İlişkili kelime kalmadıysa döngüyü bitir
-                if (empty($weightedWords)) {
-                    break;
+                // Sonra ilişkili kelimeler
+                $related = $this->getRelatedWords($lastWord);
+                foreach ($related as $word => $info) {
+                    if (!in_array($word, $usedWords)) {
+                        $nextWordCandidates[$word] = $info['strength'];
+                    }
                 }
                 
-                // En yüksek ağırlıklı kelimeyi seç
-                arsort($weightedWords);
-                $nextWord = key($weightedWords);
-                
-                // Kelimeyi cümleye ekle
+                // Veritabanından ekstra ilişkiler çek
+                try {
+                    $dbRelations = WordRelation::where('word', $lastWord)
+                        ->where(function($query) {
+                            $query->where('relation_type', 'association')
+                                  ->orWhere('relation_type', 'synonym');
+                        })
+                        ->where('strength', '>', 0.2)
+                        ->limit(5)
+                        ->get();
+                        
+                    foreach ($dbRelations as $relation) {
+                        if (!in_array($relation->related_word, $usedWords)) {
+                            $nextWordCandidates[$relation->related_word] = $relation->strength;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    // Veritabanı hatası - görmezden gel
+                }
+            }
+            
+            // Cümle yapısını iyileştirmek için bağlaç veya fiil ekleme
+            if (count($sentence) >= 2 && count($sentence) < $targetLength - 1 && mt_rand(0, 2) == 0) {
+                // Cümleye bir bağlaç ekle (33% olasılık)
+                $connector = $connectors[array_rand($connectors)];
+                if (!in_array($connector, $usedWords)) {
+                    $sentence[] = $connector;
+                    $usedWords[] = $connector;
+                    continue;
+                }
+            }
+            
+            // Cümle sonuna fiil ekle
+            if (count($sentence) >= $minLength && count($sentence) >= $targetLength - 1) {
+                $verb = $verbs[array_rand($verbs)];
+                if (!in_array($verb, $usedWords)) {
+                    $sentence[] = $verb;
+                    $usedWords[] = $verb;
+                    break; // Cümleyi sonlandır
+                }
+            }
+            
+            // İlişkili kelime bulunduysa, içinden en yüksek skora sahip olanı seç
+            if (!empty($nextWordCandidates)) {
+                arsort($nextWordCandidates);
+                $nextWord = array_key_first($nextWordCandidates);
                 $sentence[] = $nextWord;
                 $usedWords[] = $nextWord;
+            } else {
+                // İlişkili kelime bulunamadıysa rastgele bir kelime çek
+                try {
+                    $randomWord = WordRelation::inRandomOrder()
+                        ->whereNotIn('word', $usedWords)
+                        ->where('language', $this->language)
+                        ->first();
+                        
+                    if ($randomWord) {
+                        $sentence[] = $randomWord->word;
+                        $usedWords[] = $randomWord->word;
+                    } else {
+                        // Random kelime de bulunamadıysa, sabit bir kelime kullan
+                        $fallbackWords = ['ve', 'önemli', 'gerekli', 'vardır'];
+                        foreach ($fallbackWords as $word) {
+                            if (!in_array($word, $usedWords)) {
+                                $sentence[] = $word;
+                                $usedWords[] = $word;
+                                break;
+                            }
+                        }
+                    }
+                } catch (\Exception $e) {
+                    // Veritabanı hatası - cümleyi mevcut haliyle tamamla
+                    break;
+                }
             }
-            
-            // Minimum uzunluğa ulaşmadıysa boş dön
-            if (count($sentence) < $minLength) {
-                return '';
-            }
-            
-            // Cümleyi birleştir
-            $result = implode(' ', $sentence);
-            $result = ucfirst($result) . '.';
-            
-            return $result;
-            
-        } catch (\Exception $e) {
-            Log::error('İlişkisel cümle oluşturma hatası: ' . $e->getMessage());
-            return '';
         }
+        
+        // Cümleyi oluştur
+        $result = implode(' ', $sentence);
+        
+        // İlk harfi büyüt ve nokta ekle
+        $result = ucfirst($result);
+        if (substr($result, -1) != '.') {
+            $result .= '.';
+        }
+        
+        return $result;
     }
     
     /**

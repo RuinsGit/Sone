@@ -51,6 +51,14 @@ class Kernel extends ConsoleKernel
                  ->onFailure(function () {
                      \Log::error('ai:learn-relations komutu çalıştırılamadı');
                  });
+                 
+        // Her 10 dakikada bir otomatik cümle üretme işlemini çalıştır 
+        $schedule->command('ai:generate-sentences --count=5')
+                 ->everyTenMinutes()
+                 ->appendOutputTo(storage_path('logs/scheduler-sentences.log'))
+                 ->onFailure(function () {
+                     \Log::error('ai:generate-sentences komutu çalıştırılamadı');
+                 });
         
         // Saatlik veritabanı temizliği
         $schedule->command('ai:db-maintenance --mode=clean')

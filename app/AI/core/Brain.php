@@ -7,6 +7,7 @@ use App\AI\Core\EmotionEngine;
 use App\AI\Learn\LearningSystem;
 use App\AI\Core\Consciousness;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class Brain
 {
@@ -16,6 +17,7 @@ class Brain
     private $consciousness;
     private $lastThoughtTime;
     private $thoughtQueue = [];
+    private $wordRelations;
     
     public function __construct()
     {
@@ -31,6 +33,7 @@ class Brain
         $this->emotions = new EmotionEngine();
         $this->learning = new LearningSystem();
         $this->consciousness = new Consciousness();
+        $this->wordRelations = app(\App\AI\Core\WordRelations::class);
     }
     
     private function startBackgroundProcesses()
@@ -42,24 +45,175 @@ class Brain
         }
     }
     
+    /**
+     * Düşünme süreci
+     */
     private function think()
     {
-        // Hafızadaki bilgileri analiz et
-        $memories = $this->memory->getLongTermMemory();
-        $emotionalState = $this->emotions->getCurrentEmotion();
-        $learningStatus = $this->learning->getStatus();
+        try {
+            // Mevcut bilinç durumunu kontrol et
+            $consciousness = new Consciousness();
+            $consciousnessState = $consciousness->getStatus();
+            
+            // Son belirli sayıda anıyı al
+            $memories = $this->memory->getRecentMemories(50);
+            
+            // Bellek boşsa düşünme
+            if (empty($memories)) {
+                return;
+            }
+            
+            // Mevcut duygusal durumu al
+            $emotionalState = $this->emotionEngine->getCurrentEmotion();
+            
+            // Hafızadan kalıplar bul
+            $patterns = $this->findPatterns($memories);
+            
+            // Kalıplardan kurallar oluştur
+            $rules = $this->generateRules($patterns);
+            
+            // Öğrenmeyi uygula
+            $this->applyLearning($patterns, $rules);
+            
+            // Bilinci güncelle
+            $this->updateConsciousness($patterns, $rules);
+            
+            // Yeni cümleler üret ve öğren
+            $this->generateAndLearnSentences($patterns, $emotionalState);
+            
+            // İlişkileri öğren
+            $this->wordRelations->collectAndLearnRelations();
+            
+            // Öğrenme sürecini günlüğe kaydet
+            Log::info('Düşünme süreci tamamlandı. ' . count($patterns) . ' kalıp, ' . count($rules) . ' kural');
+            
+        } catch (\Exception $e) {
+            Log::error('Düşünme hatası: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Kalıplardan yeni cümleler üret ve öğren
+     */
+    private function generateAndLearnSentences($patterns, $emotionalState)
+    {
+        try {
+            // Consciousness nesnesi oluştur
+            $consciousness = new Consciousness();
+            
+            // En az 3 kalıp varsa işleme devam et
+            if (count($patterns) < 3) {
+                return;
+            }
+            
+            // En sık kullanılan kalıpları al (en fazla 5)
+            $topPatterns = array_slice($patterns, 0, 5);
+            
+            // Her bir kalıp için bir cümle üret
+            foreach ($topPatterns as $pattern) {
+                // Kavram tanımla
+                $concept = $pattern['pattern'];
+                
+                if (empty($concept) || strlen($concept) < 3) {
+                    continue;
+                }
+                
+                // Farklı cümle üretme yöntemleri kullan
+                $method = rand(0, 3);
+                $sentence = '';
+                
+                switch ($method) {
+                    case 0:
+                        // Kavramsal cümle üretimi
+                        $sentence = $this->wordRelations->generateConceptualSentence($concept);
+                        break;
+                    case 1:
+                        // İlişkisel cümle üretimi
+                        $sentence = $this->wordRelations->generateSentenceWithRelations($concept);
+                        break;
+                    case 2:
+                        // Duygusal cümle üretimi
+                        $emotion = $emotionalState['emotion'] ?? 'neutral';
+                        $sentence = $this->generateEmotionalSentence($concept, $emotion);
+                        break;
+                    case 3:
+                        // Bilinç tabanlı cümle üretimi
+                        $sentence = $consciousness->generateConceptualSentence($concept);
+                        break;
+                }
+                
+                // Üretilen cümle boş değilse öğren
+                if (!empty($sentence)) {
+                    // Cümleyi hafızaya kaydet
+                    $this->memory->addMemory($sentence, [
+                        'type' => 'generated',
+                        'concept' => $concept,
+                        'confidence' => $pattern['confidence'] ?? 0.7,
+                        'emotional_context' => $emotionalState
+                    ]);
+                    
+                    // Cümleyi bilinç sistemine öğret
+                    $consciousness->update($sentence, $emotionalState);
+                    
+                    // Kelime ilişkilerini öğren
+                    $words = explode(' ', $sentence);
+                    $mainWord = $words[0];
+                    
+                    for ($i = 1; $i < count($words); $i++) {
+                        if (strlen($words[$i]) > 3) {
+                            $this->wordRelations->learnAssociation($mainWord, $words[$i], 'generated', 0.6);
+                        }
+                    }
+                    
+                    // Öğrenilen cümleyi kaydet
+                    Log::info('Yeni cümle üretildi ve öğrenildi: ' . $sentence);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Cümle üretme hatası: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Duygusal duruma göre cümle üret
+     */
+    private function generateEmotionalSentence($concept, $emotion)
+    {
+        // Duygu durumuna göre kelimeler
+        $emotionalWords = [
+            'happy' => ['güzel', 'harika', 'sevindirici', 'keyifli', 'mutlu', 'neşeli'],
+            'sad' => ['üzücü', 'kötü', 'zorlu', 'zor', 'hüzünlü', 'acıklı'],
+            'angry' => ['sinir', 'kızgın', 'öfkeli', 'hiddetli', 'rahatsız'],
+            'surprised' => ['şaşırtıcı', 'beklenmedik', 'sürpriz', 'ilginç', 'hayret'],
+            'fearful' => ['korkutucu', 'tedirgin', 'endişeli', 'tehlikeli', 'riskli'],
+            'neutral' => ['normal', 'olağan', 'standart', 'bilinen', 'alışılmış']
+        ];
         
-        // Yeni bağlantılar ve kalıplar bul
-        $patterns = $this->findPatterns($memories);
+        // Kullanılacak duygusal kelimeler
+        $wordSet = $emotionalWords[$emotion] ?? $emotionalWords['neutral'];
         
-        // Yeni kurallar oluştur
-        $rules = $this->generateRules($patterns);
+        // Cümle kalıpları
+        $templates = [
+            "%concept% gerçekten %emotion_word% bir kavramdır.",
+            "%concept% hakkında düşünmek %emotion_word% bir deneyimdir.",
+            "%emotion_word% bir şekilde, %concept% önemlidir.",
+            "%concept% ile ilgili %emotion_word% düşüncelerim var."
+        ];
         
-        // Öğrenilen bilgileri uygula
-        $this->applyLearning($patterns, $rules);
+        // Rasgele bir duygu kelimesi seç
+        $emotionWord = $wordSet[array_rand($wordSet)];
         
-        // Bilinç durumunu güncelle
-        $this->updateConsciousness($patterns, $rules);
+        // Rasgele bir kalıp seç
+        $template = $templates[array_rand($templates)];
+        
+        // Kalıbı doldur
+        $sentence = str_replace(
+            ['%concept%', '%emotion_word%'],
+            [$concept, $emotionWord],
+            $template
+        );
+        
+        return $sentence;
     }
     
     private function findPatterns($memories)
