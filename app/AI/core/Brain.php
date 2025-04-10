@@ -8,6 +8,7 @@ use App\AI\Learn\LearningSystem;
 use App\AI\Core\Consciousness;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use App\Models\AIData;
 
 class Brain
 {
@@ -1465,9 +1466,55 @@ class Brain
         return $this->memory->getUsagePercentage();
     }
     
+    /**
+     * Öğrenme sisteminin ilerleme bilgisini getir
+     * 
+     * @return array İlerleme bilgisi
+     */
     public function getLearningProgress()
     {
-        return $this->learning->getProgress();
+        try {
+            // Öğrenme sistemi var mı kontrol et
+            if (!$this->learningSystem) {
+                return [
+                    'is_learning' => false,
+                    'progress' => 0,
+                    'message' => 'Öğrenme sistemi başlatılmadı'
+                ];
+            }
+            
+            // Önce cache'den ilerleme bilgisini kontrol et
+            $cachedProgress = Cache::get('learning_progress');
+            
+            if ($cachedProgress) {
+                // Cache'deki bilgiyi kullan
+                $progress = $cachedProgress;
+                
+                // Ek bilgiler ekle
+                $progress['progress_percent'] = $progress['total'] > 0 ? 
+                    round(($progress['learned'] / $progress['total']) * 100) : 0;
+                    
+                $progress['elapsed_time_formatted'] = isset($progress['updated_at']) ? 
+                    now()->diffForHumans(new \DateTime($progress['updated_at'])) : null;
+                
+                return array_merge([
+                    'is_learning' => $this->learningSystem->getStatus()['isLearning'],
+                    'cache_used' => true
+                ], $progress);
+            }
+            
+            // Cache'de bilgi yoksa veya güncel değilse, doğrudan öğrenme sistemini kullan
+            return $this->learningSystem->getProgress();
+        } catch (\Exception $e) {
+            Log::error('Öğrenme ilerleme bilgisi alma hatası: ' . $e->getMessage());
+            
+            return [
+                'is_learning' => false,
+                'progress' => 0,
+                'message' => 'Öğrenme ilerleme bilgisi alınamadı: ' . $e->getMessage(),
+                'error' => true
+            ];
+        }
     }
     
     public function getConsciousnessLevel()

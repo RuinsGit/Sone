@@ -218,6 +218,77 @@ class ManageController extends Controller
     }
     
     /**
+     * Belirli bir kelime için akıllı cümleler oluştur
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generateSmartSentences(Request $request)
+    {
+        try {
+            // Parametreleri doğrula
+            $request->validate([
+                'word' => 'required|string|min:2|max:50',
+                'count' => 'nullable|integer|min:1|max:10',
+                'save' => 'nullable|boolean'
+            ]);
+            
+            $word = trim($request->input('word'));
+            $count = $request->input('count', 3);
+            $save = $request->input('save', true);
+            
+            // WordRelations sınıfını başlat
+            $wordRelations = app(WordRelations::class);
+            
+            // Kelime öğrenilmiş mi kontrol et
+            $wordExists = AIData::where('word', $word)->exists();
+            if (!$wordExists) {
+                // Kelime öğrenilmemişse, sisteme öğret
+                $learningSystem = $this->loadLearningSystem();
+                if (!$learningSystem) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Öğrenme sistemi başlatılamadı'
+                    ], 500);
+                }
+                
+                $result = $learningSystem->learnWord($word);
+                if (!$result['success']) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Kelime öğrenilemedi: ' . $result['message']
+                    ], 400);
+                }
+                
+                Log::info("$word kelimesi öğrenildi, şimdi akıllı cümleler oluşturulacak");
+            }
+            
+            // Akıllı cümleler oluştur
+            $sentences = $wordRelations->generateSmartSentences($word, $save, $count);
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'word' => $word,
+                    'sentences' => $sentences,
+                    'count' => count($sentences)
+                ],
+                'message' => count($sentences) > 0 
+                    ? $word . ' kelimesi için ' . count($sentences) . ' cümle oluşturuldu' 
+                    : $word . ' kelimesi için cümle oluşturulamadı'
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Akıllı cümle oluşturma hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Akıllı cümle oluşturma hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
      * Öğrenme sistemini yükle
      * 
      * @return LearningSystem
@@ -310,6 +381,174 @@ class ManageController extends Controller
                 'success' => false,
                 'message' => 'Öğrenme ilerleme bilgisi alma hatası: ' . $e->getMessage()
             ], 500);
+        }
+    }
+    
+    /**
+     * Öğrenme işlemini durdur
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function stopLearningProcess()
+    {
+        try {
+            $learningSystem = $this->loadLearningSystem();
+            
+            $result = $learningSystem->stopLearning();
+            
+            return response()->json([
+                'success' => $result['success'],
+                'message' => $result['message'],
+                'data' => $result['data'] ?? null
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Öğrenme işlemi durdurulurken hata: ' . $e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Öğrenme işlemi durdurulurken bir hata oluştu: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Otomatik olarak kelimeler seçip akıllı cümleler oluştur
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generateAutoSentences(Request $request)
+    {
+        try {
+            // Parametreleri doğrula
+            $request->validate([
+                'count' => 'nullable|integer|min:1|max:50',
+                'save' => 'nullable|boolean'
+            ]);
+            
+            $count = $request->input('count', 10);
+            $save = $request->input('save', true);
+            
+            // LearningSystem'ı yükle
+            $learningSystem = $this->loadLearningSystem();
+            
+            // WordRelations sınıfını başlat
+            $wordRelations = app(WordRelations::class);
+            
+            // Otomatik olarak kelimeler seç
+            $words = $learningSystem->getAutomaticWordsToLearn($count);
+            
+            if (empty($words)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Öğrenilecek kelime bulunamadı'
+                ]);
+            }
+            
+            Log::info("Otomatik seçilen kelimeler: " . implode(", ", $words));
+            
+            $allSentences = [];
+            $learnedWords = [];
+            
+            // Her kelime için cümle oluştur
+            foreach ($words as $word) {
+                // Önce kelimeyi öğren (eğer öğrenilmemişse)
+                if (!AIData::where('word', $word)->exists()) {
+                    $result = $learningSystem->learnWord($word);
+                    if ($result['success']) {
+                        $learnedWords[] = $word;
+                    } else {
+                        Log::warning("Kelime öğrenme hatası: " . $result['message']);
+                        continue;
+                    }
+                }
+                
+                // Akıllı cümleler oluştur
+                $sentences = $wordRelations->generateSmartSentences($word, $save, 3);
+                
+                if (!empty($sentences)) {
+                    $allSentences[$word] = $sentences;
+                }
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => count($allSentences) . ' kelime için toplam ' . array_sum(array_map('count', $allSentences)) . ' cümle oluşturuldu',
+                'data' => [
+                    'words' => array_keys($allSentences),
+                    'sentences' => $allSentences,
+                    'newly_learned' => $learnedWords
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Otomatik cümle oluşturma hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Otomatik cümle oluşturma hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Tüm öğrenilen kelimeleri getir
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function getAllWords(Request $request)
+    {
+        try {
+            // Filtreleme parametreleri
+            $search = $request->input('search', '');
+            $category = $request->input('category', '');
+            $sort = $request->input('sort', 'word');
+            $order = $request->input('order', 'asc');
+            
+            // Kelime sorgusunu oluştur
+            $query = AIData::query();
+            
+            // Arama filtresi
+            if (!empty($search)) {
+                $query->where('word', 'like', "%{$search}%")
+                    ->orWhere('sentence', 'like', "%{$search}%");
+            }
+            
+            // Kategori filtresi
+            if (!empty($category)) {
+                $query->where('category', $category);
+            }
+            
+            // Sıralama
+            $query->orderBy($sort, $order);
+            
+            // Sayfalandırılmış sonuçları al
+            $words = $query->paginate(20);
+            
+            // Benzersiz kategorileri al
+            $categories = AIData::distinct()->pluck('category');
+            
+            return view('ai.words', [
+                'words' => $words,
+                'categories' => $categories,
+                'search' => $search,
+                'category' => $category,
+                'sort' => $sort,
+                'order' => $order
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Kelime listesi alma hatası: ' . $e->getMessage());
+            
+            return view('ai.words', [
+                'error' => 'Kelime listesi alınırken bir hata oluştu: ' . $e->getMessage(),
+                'words' => collect(),
+                'categories' => collect()
+            ]);
         }
     }
 }

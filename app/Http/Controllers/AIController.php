@@ -118,6 +118,86 @@ class AIController extends Controller
     }
     
     /**
+     * URL parametresiyle kelime bilgisi getir
+     * 
+     * @param string $word
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getWordInfoByParam($word)
+    {
+        try {
+            if (empty($word) || strlen($word) < 2 || strlen($word) > 100) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Geçersiz kelime parametresi'
+                ], 400);
+            }
+            
+            // Brain nesnesini oluştur
+            $brain = app(Brain::class);
+            
+            // WordRelations sınıfını da doğrudan kullan
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
+            
+            // Brain üzerinden temel kelime ilişkilerini al
+            $wordInfo = $brain->getWordRelations($word);
+            
+            // Kelimenin AI verilerini getir
+            $aiData = \App\Models\AIData::where('word', $word)->first();
+            
+            // Daha fazla veri ekle
+            if ($aiData) {
+                $wordInfo['frequency'] = $aiData->frequency;
+                $wordInfo['confidence'] = $aiData->confidence;
+                $wordInfo['category'] = $aiData->category;
+                $wordInfo['related_words'] = json_decode($aiData->related_words) ?: [];
+                $wordInfo['examples'] = json_decode($aiData->usage_examples) ?: [];
+                $wordInfo['metadata'] = json_decode($aiData->metadata) ?: [];
+                $wordInfo['emotional_context'] = json_decode($aiData->emotional_context) ?: [];
+                $wordInfo['created_at'] = $aiData->created_at->format('Y-m-d H:i:s');
+                $wordInfo['updated_at'] = $aiData->updated_at->format('Y-m-d H:i:s');
+            }
+            
+            // Tanımları getir
+            $definitions = $wordRelations->getDefinitions($word);
+            $wordInfo['definitions'] = $definitions ?: [];
+            
+            // Örnekleri ayrı bir getDefinitions metodu üzerinden al
+            $examples = $wordRelations->getExamples($word);
+            $wordInfo['examples'] = $examples ?: [];
+            
+            // İlişkili kelimelerin düz listesini oluştur
+            $relatedWordsFlat = [];
+            if (!empty($wordInfo['related_words']) && is_array($wordInfo['related_words'])) {
+                foreach ($wordInfo['related_words'] as $item) {
+                    if (is_array($item) && isset($item['word'])) {
+                        $relatedWordsFlat[] = $item['word'];
+                    } elseif (is_string($item)) {
+                        $relatedWordsFlat[] = $item;
+                    }
+                }
+            }
+            $wordInfo['related'] = $relatedWordsFlat;
+            
+            return response()->json([
+                'success' => true,
+                'data' => $wordInfo
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Kelime bilgisi alma hatası: ' . $e->getMessage(), [
+                'word' => $word,
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Kelime bilgisi alma hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
      * Öğrenme durumunu getir
      * 
      * @return \Illuminate\Http\JsonResponse

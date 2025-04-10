@@ -2,12 +2,13 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\AdminController;
-use App\Http\Controllers\Admin\AIController;
+use App\Http\Controllers\Admin\AIController as AdminAIController;
 use App\Http\Controllers\Admin\PageController;
 use App\Http\Controllers\Admin\AIChatController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ManageController;
 use App\Http\Controllers\SearchController;
+use App\Http\Controllers\AIController;
 
 /*
 |--------------------------------------------------------------------------
@@ -49,15 +50,15 @@ Route::prefix('admin')->group(function () {
 
         // AI Modelleri için rotalar
         Route::prefix('ai')->name('admin.ai.')->group(function () {
-            Route::get('/', [AIController::class, 'index'])->name('index');
-            Route::get('/create', [AIController::class, 'create'])->name('create');
-            Route::post('/', [AIController::class, 'store'])->name('store');
-            Route::get('/{aiModel}', [AIController::class, 'show'])->name('show');
-            Route::get('/{aiModel}/edit', [AIController::class, 'edit'])->name('edit');
-            Route::put('/{aiModel}', [AIController::class, 'update'])->name('update');
-            Route::delete('/{aiModel}', [AIController::class, 'destroy'])->name('destroy');
-            Route::post('/{aiModel}/train', [AIController::class, 'train'])->name('train');
-            Route::post('/{aiModel}/generate-response', [AIController::class, 'generateResponse'])->name('generate-response');
+            Route::get('/', [AdminAIController::class, 'index'])->name('index');
+            Route::get('/create', [AdminAIController::class, 'create'])->name('create');
+            Route::post('/', [AdminAIController::class, 'store'])->name('store');
+            Route::get('/{aiModel}', [AdminAIController::class, 'show'])->name('show');
+            Route::get('/{aiModel}/edit', [AdminAIController::class, 'edit'])->name('edit');
+            Route::put('/{aiModel}', [AdminAIController::class, 'update'])->name('update');
+            Route::delete('/{aiModel}', [AdminAIController::class, 'destroy'])->name('destroy');
+            Route::post('/{aiModel}/train', [AdminAIController::class, 'train'])->name('train');
+            Route::post('/{aiModel}/generate-response', [AdminAIController::class, 'generateResponse'])->name('generate-response');
         });
 
         // AI Sohbet için rotalar
@@ -111,10 +112,13 @@ Route::prefix('manage')->name('manage.')->group(function () {
     Route::post('/learning/clear', [ManageController::class, 'clearLearningSystem']);
 });
 
-// AI API rota tanımlamaları
+// Kelime listesi sayfası için yeni rota
+Route::get('/manage/words', [App\Http\Controllers\ManageController::class, 'getAllWords'])->name('manage.words');
+
+// API rotaları
 Route::prefix('api/ai')->group(function () {
     Route::post('/chat', [AIController::class, 'chat']);
-    Route::get('/word/{word}', [AIController::class, 'getWordInfo']);
+    Route::get('/word/{word}', [AIController::class, 'getWordInfoByParam']);
     Route::get('/search', [AIController::class, 'searchWords']);
     Route::get('/status', [AIController::class, 'getStatus']);
     Route::get('/learning-status', [AIController::class, 'getLearningStatus']);
@@ -133,3 +137,14 @@ Route::prefix('api/search')->group(function () {
 
 // Arama sonuç sayfası rotası (HTML görünümü için)
 Route::get('/search', [SearchController::class, 'search'])->name('search');
+
+// Yönetim API Endpointleri
+Route::prefix('api/manage')->group(function () {
+    Route::post('/learning/start', [ManageController::class, 'startLearningProcess']);
+    Route::get('/learning/status', [ManageController::class, 'getLearningStatus']);
+    Route::get('/learning/stats', [ManageController::class, 'getLearningSystemStats']);
+    Route::post('/learning/word', [ManageController::class, 'learnWord']);
+    Route::post('/learning/clear', [ManageController::class, 'clearLearningSystem']);
+    Route::post('/learning/generate-sentences', [ManageController::class, 'generateSmartSentences']);
+    Route::post('/learning/auto-sentences', [ManageController::class, 'generateAutoSentences']);
+});
