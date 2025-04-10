@@ -32,245 +32,333 @@ class ChatController extends Controller
      */
     public function sendMessage(Request $request)
     {
-        $message = $request->input('message');
-        
-        // Gelen mesajı logla
-        Log::info("Chat mesajı alındı: " . $message);
-        
         try {
-            // Boş mesaj kontrolü
+            // Gelen mesajı al
+            $message = $request->input('message');
+            
+            // Gelen mesajı logla
+            Log::info("Kullanıcı mesajı: " . $message);
+            
+            // Mesaj boş mu kontrol et
             if (empty($message)) {
                 return response()->json([
-                    'status' => 'error',
+                    'status' => 'success',
                     'message' => 'Lütfen bir mesaj yazın.'
                 ]);
             }
             
-            // Çok uzun mesaj kontrolü 
+            // Mesaj çok uzun mu kontrol et (1000 karakterden fazla ise)
             if (strlen($message) > 1000) {
                 return response()->json([
-                    'status' => 'error',
+                    'status' => 'success',
                     'message' => 'Mesajınız çok uzun. Lütfen daha kısa bir mesaj yazın.'
                 ]);
             }
-
-            // Özel durumlar - Basit kelimeler (merhaba, selam vb.)
-            $singleWordResponse = $this->handleSingleWordMessages($message);
-            if ($singleWordResponse !== null) {
-                return response()->json([
-                    'status' => 'success',
-                    'message' => $singleWordResponse
-                ]);
-            }
-
-            // AI'ye yönelik kişisel sorular (kimsin, adın ne, vs.)
-            $personalResponse = $this->handlePersonalQuestions($message);
-            if ($personalResponse !== null) {
-                return response()->json([
-                    'status' => 'success',
-                    'message' => $personalResponse
-                ]);
-            }
-
-            // Basit terim sorguları için gelişmiş yanıt
-            $wordRelations = app()->make(WordRelations::class);
             
-            // Tek kelimelik soru veya "[kelime] nedir" gibi sorular için özel işleme
-            $simpleTermQuery = $this->checkIfSimpleTermQuery($message);
-            
-            if ($simpleTermQuery !== false) {
-                $term = $simpleTermQuery;
+            // Öğrenme desenini kontrol et - "X, Y demektir" gibi formatlar
+            $learningPattern = $this->checkLearningPattern($message);
+            if ($learningPattern !== false) {
+                $word = $learningPattern['word'];
+                $definition = $learningPattern['definition'];
                 
-                // Kelime geçerli mi kontrol et
-                if (!$wordRelations->isValidWord($term)) {
+                // WordRelations sınıfını doğrudan kullan
+                $wordRelations = app(\App\AI\Core\WordRelations::class);
+                
+                // Kelimeyi doğrula
+                if (!$wordRelations->isValidWord($word)) {
                     return response()->json([
                         'status' => 'success',
-                        'message' => 'Bu bir kelime gibi görünmüyor. Lütfen geçerli bir kelime girin.'
+                        'message' => "Üzgünüm, '$word' kelimesini öğrenmem için geçerli bir kelime olması gerekiyor."
                     ]);
                 }
                 
-                try {
-                    // Kelime bilgilerini al
-                    $definition = $wordRelations->getDefinition($term);
-                    $synonyms = $wordRelations->getSynonyms($term);
-                    $relatedWords = $wordRelations->getAssociatedWords($term);
-                    
-                    $response = "";
-                    $hasInfo = false;
-                    
-                    // Tanım varsa
-                    if (!empty($definition)) {
-                        $hasInfo = true;
-                        $templates = [
-                            "{$term}, {$definition}.",
-                            "Bildiğim kadarıyla {$term}, {$definition}.",
-                            "{$term} kelimesi {$definition}.",
-                            "{$term} kavramı {$definition}.",
-                            "Bana göre {$term} {$definition}.",
-                            "{$term} denildiğinde, {$definition}."
-                        ];
-                        $response = $templates[array_rand($templates)];
+                // Tanımı kaydet - hem veritabanına hem session'a
+                $saveResult = $wordRelations->learnDefinition($word, $definition, true);
+                
+                // Session'a kaydet - bu kritik - her zaman session'ı güncelle
+                session(["word_definition_" . strtolower($word) => $definition]);
+                
+                // İlişkili kelimeleri de ayarla
+                $words = explode(' ', $definition);
+                foreach ($words as $relatedWord) {
+                    if ($wordRelations->isValidWord($relatedWord) && $relatedWord != $word) {
+                        $wordRelations->learnAssociation($word, $relatedWord, 'user_defined', 0.9);
                     }
-                    
-                    // Eşanlamlılar varsa
-                    if (!empty($synonyms)) {
-                        $hasInfo = true;
-                        $synonymList = implode(", ", array_slice($synonyms, 0, 5));
-                        
-                        if (empty($response)) {
-                            $templates = [
-                                "{$term} kelimesinin eş anlamlıları: {$synonymList}.",
-                                "{$term} ile {$synonymList} benzer anlamlara gelir.",
-                                "{$term} yerine {$synonymList} kelimelerini de kullanabilirsiniz.",
-                                "{$term} demek, {$synonymList} demektir."
-                            ];
-                            $response = $templates[array_rand($templates)];
-                        } else {
-                            // Tanım zaten varsa, eşanlamlıları da ekle
-                            $templates = [
-                                " Eş anlamlıları arasında {$synonymList} bulunur.",
-                                " Ayrıca {$synonymList} kelimeleri de benzer anlama gelir.",
-                                " {$synonymList} de benzer kavramlardır."
-                            ];
-                            $response .= $templates[array_rand($templates)];
-                        }
-                    }
-                    
-                    // İlişkili kelimeler varsa
-                    if (!empty($relatedWords)) {
-                        $hasInfo = true;
-                        $relatedList = [];
-                        
-                        // En fazla 5 ilişkili kelime al
-                        foreach (array_slice($relatedWords, 0, 5) as $related) {
-                            if (is_array($related) && isset($related['word'])) {
-                                $relatedList[] = $related['word'];
-                            } else if (is_string($related)) {
-                                $relatedList[] = $related;
-                            }
-                        }
-                        
-                        if (!empty($relatedList)) {
-                            $relatedText = implode(", ", $relatedList);
-                            
-                            if (empty($response)) {
-                                $templates = [
-                                    "{$term} denince aklıma {$relatedText} geliyor.",
-                                    "{$term} kelimesini duyduğumda {$relatedText} gibi kavramlar geliyor.",
-                                    "{$term} ile ilişkili kelimeler: {$relatedText}.",
-                                    "{$term} kavramı {$relatedText} ile bağlantılıdır."
-                                ];
-                                $response = $templates[array_rand($templates)];
-                            } else {
-                                // Önceki bilgilere ilişkili kelimeleri ekle
-                                $templates = [
-                                    " Bu kavramla ilişkili olarak {$relatedText} söylenebilir.",
-                                    " {$term} denilince akla {$relatedText} da gelir.",
-                                    " {$relatedText} kavramları da {$term} ile ilişkilidir."
-                                ];
-                                $response .= $templates[array_rand($templates)];
-                            }
-                        }
-                    }
-                    
-                    // Özel kavramsal cümle oluştur
-                    try {
-                        $conceptualSentence = $wordRelations->generateConceptualSentence($term);
-                        if (!empty($conceptualSentence) && $conceptualSentence !== false) {
-                            if (empty($response)) {
-                                $response = $conceptualSentence;
-                            } else {
-                                // Rastgele şekilde konuma bağlı olarak ekleyelim
-                                if (rand(0, 1) == 0) {
-                                    $response = $conceptualSentence . " " . $response;
-                                } else {
-                                    $response .= " " . $conceptualSentence;
-                                }
-                            }
-                            $hasInfo = true;
-                        }
-                    } catch (\Exception $e) {
-                        Log::error("Kavramsal cümle oluşturma hatası: " . $e->getMessage());
-                    }
-                    
-                    // Eğer kelime hakkında bilgi bulunamadıysa
-                    if (!$hasInfo) {
-                        $unknownResponses = [
-                            "Üzgünüm, '{$term}' hakkında bilgim yok. Bana bu kelime hakkında bilgi verebilir misiniz?",
-                            "'{$term}' hakkında bir şey bilmiyorum. Bu konuda bana ne öğretebilirsiniz?",
-                            "Henüz '{$term}' kavramını öğrenmedim. Bu kelime ne anlama geliyor?",
-                            "'{$term}' hakkında bilgim yok. Bana açıklayabilir misiniz?",
-                            "Maalesef '{$term}' hakkında hiçbir bilgiye sahip değilim. Bunu bana öğretir misiniz?"
-                        ];
-                        $response = $unknownResponses[array_rand($unknownResponses)];
-                    }
+                }
+                
+                if ($saveResult) {
+                    // Onay yanıtları
+                    $confirmations = [
+                        "Teşekkürler! '$word' kelimesinin '$definition' anlamına geldiğini öğrendim.",
+                        "Anladım, '$word' kelimesi '$definition' demekmiş. Bu bilgiyi kaydettim.",
+                        "Bilgi için teşekkürler! '$word' kelimesinin tanımını öğrendim. Bundan sonra bu bilgiyi kullanabilirim.",
+                        "'$word' kelimesinin '$definition' olduğunu öğrendim. Teşekkür ederim!",
+                        "Yeni bir şey öğrendim: '$word', '$definition' anlamına geliyormuş."
+                    ];
                     
                     return response()->json([
                         'status' => 'success',
-                        'message' => $response
+                        'message' => $confirmations[array_rand($confirmations)]
                     ]);
-                    
-                } catch (\Exception $e) {
-                    Log::error("Kelime bilgisi alınırken hata: " . $e->getMessage());
-                    // Hata durumunda normal akışa devam et
+                } else {
+                    return response()->json([
+                        'status' => 'success',
+                        'message' => "Üzgünüm, '$word' kelimesinin tanımını kaydederken bir sorun oluştu. Yine de öğrenmeye çalışacağım."
+                    ]);
                 }
             }
             
-            // Gelen mesajı işle ve yanıt oluştur
-            $brain = app()->make(Brain::class);
-            $responseMessage = $brain->processInput($message);
+            // Soru kalıpları kontrolü - "X nedir", "X ne demek" gibi formatlar
+            $questionPattern = $this->checkQuestionPattern($message);
+            if ($questionPattern !== false) {
+                $term = $questionPattern['term'];
+                
+                // Session'da tanım var mı kontrol et - bu kritik!
+                $sessionKey = "word_definition_" . strtolower($term);
+                if (session()->has($sessionKey)) {
+                    $definition = session($sessionKey);
+                    
+                    // Yanıt kalıpları
+                    $responses = [
+                        "'$term', $definition.",
+                        "Bildiğim kadarıyla $term, $definition.",
+                        "$term kelimesi $definition.",
+                        "$term kavramı $definition."
+                    ];
+                    
+                    Log::info("Session'dan kelime bulundu: $term = $definition");
+                    
+                    return response()->json([
+                        'status' => 'success',
+                        'message' => $responses[array_rand($responses)]
+                    ]);
+                }
+                
+                // WordRelations'dan kelime bilgisi sorgula
+                $wordRelations = app(\App\AI\Core\WordRelations::class);
+                $definition = $wordRelations->getDefinition($term);
+                
+                if (!empty($definition)) {
+                    // Tanım varsa session'a da kaydet
+                    session([$sessionKey => $definition]);
+                    
+                    // Yanıt kalıpları
+                    $responses = [
+                        "'$term', $definition.",
+                        "Bildiğim kadarıyla $term, $definition.",
+                        "$term kelimesi $definition.",
+                        "$term kavramı $definition."
+                    ];
+                    
+                    Log::info("Veritabanından kelime bulundu: $term");
+                    
+                    return response()->json([
+                        'status' => 'success',
+                        'message' => $responses[array_rand($responses)]
+                    ]);
+                }
+                
+                // Kelime bulunamadıysa
+                // Son sorguyu kaydet - daha sonra kullanıcı "budur" derse kullanmak için
+                session(['last_unknown_query' => $term]);
+                
+                $unknownResponses = [
+                    "Üzgünüm, '$term' hakkında bilgim yok. Bana bu kelime hakkında bilgi verebilir misiniz? Örneğin: '$term demek, ... demektir'",
+                    "'$term' hakkında bir şey bilmiyorum. Bana '$term demektir' diyerek bu kelimeyi öğretebilir misiniz?",
+                    "Henüz '$term' kavramını öğrenmedim. Ne anlama geldiğini bana söyleyebilir misiniz?",
+                    "'$term' hakkında bilgim yok. Bana açıklayabilir misiniz?",
+                    "Maalesef '$term' hakkında hiçbir bilgiye sahip değilim. Bunu bana öğretir misiniz?"
+                ];
+                
+                return response()->json([
+                    'status' => 'success',
+                    'message' => $unknownResponses[array_rand($unknownResponses)]
+                ]);
+            }
+            
+            // Normal mesaj işleme - Brain üzerinden yap
+            try {
+                $brain = new \App\AI\Core\Brain();
+                $response = $brain->processInput($message);
+                
+                return response()->json([
+                    'status' => 'success',
+                    'message' => $response
+                ]);
+            } catch (\Exception $e) {
+                Log::error("Brain işleme hatası: " . $e->getMessage());
+                
+                return response()->json([
+                    'status' => 'success',
+                    'message' => "Düşünme sürecimde bir hata oluştu. Lütfen tekrar deneyin."
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error("Genel hata: " . $e->getMessage());
             
             return response()->json([
                 'status' => 'success',
-                'message' => $responseMessage
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error("Chat mesajı işlenirken hata: " . $e->getMessage());
-            
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Mesajınız işlenirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.'
+                'message' => 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.'
             ]);
         }
     }
     
     /**
-     * Basit terim sorgusu mu kontrol et (tek kelime veya "nedir/kimdir" sorguları)
+     * Öğrenme kalıplarını kontrol et
      */
-    private function checkIfSimpleTermQuery($message)
+    private function checkLearningPattern($message)
     {
         // Mesajı temizle
-        $message = trim(strtolower($message));
+        $message = trim($message);
         
-        // Tek kelime mi?
-        if (!str_contains($message, ' ')) {
-            return $message;
+        // "X, Y demektir" kalıbı
+        if (preg_match('/^(.+?)[,\s]+(.+?)\s+demektir\.?$/i', $message, $matches)) {
+            return [
+                'word' => trim($matches[1]),
+                'definition' => trim($matches[2])
+            ];
         }
+        
+        // "X demek, Y demek" kalıbı
+        if (preg_match('/^(.+?)\s+demek[,\s]+(.+?)\s+demek(tir)?\.?$/i', $message, $matches)) {
+            return [
+                'word' => trim($matches[1]),
+                'definition' => trim($matches[2])
+            ];
+        }
+        
+        // "X, Y anlamına gelir" kalıbı
+        if (preg_match('/^(.+?)[,\s]+(.+?)\s+anlamına gelir\.?$/i', $message, $matches)) {
+            return [
+                'word' => trim($matches[1]),
+                'definition' => trim($matches[2])
+            ];
+        }
+        
+        // "X Y'dir" kalıbı
+        if (preg_match('/^(.+?)\s+(.+?)d[ıiuü]r\.?$/i', $message, $matches)) {
+            return [
+                'word' => trim($matches[1]),
+                'definition' => trim($matches[2])
+            ];
+        }
+        
+        // "X budur" kalıbı - son sorgu biliniyorsa
+        if (preg_match('/^(.+?)\s+(budur|odur|şudur)\.?$/i', $message, $matches)) {
+            $lastQuery = session('last_unknown_query', '');
+            if (!empty($lastQuery)) {
+                return [
+                    'word' => $lastQuery,
+                    'definition' => trim($matches[1])
+                ];
+            }
+        }
+        
+        // "X köpek demek" gibi basit kalıp
+        if (preg_match('/^(.+?)\s+(.+?)\s+demek$/i', $message, $matches)) {
+            return [
+                'word' => trim($matches[1]),
+                'definition' => trim($matches[2])
+            ];
+        }
+        
+        // "tank silah demektir" gibi kalıp
+        if (preg_match('/^(.+?)\s+(.+?)\s+demektir$/i', $message, $matches)) {
+            return [
+                'word' => trim($matches[1]),
+                'definition' => trim($matches[2])
+            ];
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Soru kalıplarını kontrol et
+     */
+    private function checkQuestionPattern($message)
+    {
+        // Mesajı temizle
+        $message = mb_strtolower(trim($message), 'UTF-8');
         
         // "X nedir" formatı
-        if (preg_match('/^(.+)\s+nedir\??$/i', $message, $matches)) {
-            return trim($matches[1]);
-        }
-        
-        // "X kimdir" formatı
-        if (preg_match('/^(.+)\s+kimdir\??$/i', $message, $matches)) {
-            return trim($matches[1]);
+        if (preg_match('/^(.+?)\s+nedir\??$/u', $message, $matches)) {
+            return [
+                'type' => 'definition',
+                'term' => trim($matches[1])
+            ];
         }
         
         // "X ne demek" formatı
-        if (preg_match('/^(.+)\s+ne\s+demek\??$/i', $message, $matches)) {
-            return trim($matches[1]);
+        if (preg_match('/^(.+?)\s+ne\s+demek\??$/u', $message, $matches)) {
+            return [
+                'type' => 'definition',
+                'term' => trim($matches[1])
+            ];
         }
         
-        // "X hakkında bilgi ver" formatı
-        if (preg_match('/^(.+)\s+hakkında\s+bilgi\s+ver/i', $message, $matches)) {
-            return trim($matches[1]);
+        // "X ne demektir" formatı
+        if (preg_match('/^(.+?)\s+ne\s+demektir\??$/u', $message, $matches)) {
+            return [
+                'type' => 'definition',
+                'term' => trim($matches[1])
+            ];
         }
         
         // "X anlamı nedir" formatı
-        if (preg_match('/^(.+)\s+anlamı\s+nedir\??$/i', $message, $matches)) {
-            return trim($matches[1]);
+        if (preg_match('/^(.+?)\s+anlamı\s+nedir\??$/u', $message, $matches)) {
+            return [
+                'type' => 'definition',
+                'term' => trim($matches[1])
+            ];
+        }
+        
+        // "X hakkında" formatı
+        if (preg_match('/^(.+?)\s+hakkında\??$/u', $message, $matches)) {
+            return [
+                'type' => 'about',
+                'term' => trim($matches[1])
+            ];
+        }
+        
+        // "X kelimesi ne demek" formatı
+        if (preg_match('/^(.+?)\s+kelimesi\s+ne\s+demek\??$/u', $message, $matches)) {
+            return [
+                'type' => 'definition',
+                'term' => trim($matches[1])
+            ];
+        }
+        
+        // "sen Xmisin" formatı
+        if (preg_match('/^sen\s+(.+?)(?:\s*mi[sş]in)?\??$/ui', $message, $matches)) {
+            return [
+                'type' => 'question',
+                'term' => trim($matches[1])
+            ];
+        }
+        
+        // "o Xmi" formatı
+        if (preg_match('/^o\s+(.+?)(?:\s*mi)?\??$/ui', $message, $matches)) {
+            return [
+                'type' => 'question',
+                'term' => trim($matches[1])
+            ];
+        }
+        
+        // "X ne" formatı
+        if (preg_match('/^(.+?)\s+ne\??$/ui', $message, $matches)) {
+            return [
+                'type' => 'what',
+                'term' => trim($matches[1])
+            ];
+        }
+        
+        // Tek kelime sorgusu
+        if (!str_contains($message, ' ') && strlen($message) > 1) {
+            return [
+                'type' => 'single',
+                'term' => trim($message)
+            ];
         }
         
         return false;
@@ -328,115 +416,242 @@ class ChatController extends Controller
      */
     private function handlePersonalQuestions($message)
     {
-        // Mesajı temizle ve küçük harfe çevir
-        $message = strtolower(trim($message));
-        
-        // AI'nin bilgileri
-        $aiInfo = [
-            'name' => 'SoneAI',
-            'purpose' => 'size yardımcı olmak ve bilgi sağlamak',
-            'creator' => 'geliştiricilerim',
-            'birthday' => '2023 yılında',
-            'location' => 'bir sunucu üzerinde',
-            'likes' => 'yeni bilgiler öğrenmeyi ve insanlara yardımcı olmayı',
-            'dislikes' => 'cevap veremediğim soruları'
-        ];
-        
-        // Kimlik soruları (sen kimsin, adın ne, vb.)
-        $identityPatterns = [
-            '/(?:sen|siz) kimsin/i' => [
-                "Ben {$aiInfo['name']}, yapay zeka destekli bir dil asistanıyım. Amacım {$aiInfo['purpose']}.",
-                "Merhaba! Ben {$aiInfo['name']}, size yardımcı olmak için tasarlanmış bir yapay zeka asistanıyım.",
-                "Ben {$aiInfo['name']}, {$aiInfo['creator']} tarafından oluşturulmuş bir yapay zeka asistanıyım."
-            ],
-            '/(?:ismin|adın|adınız) (?:ne|nedir)/i' => [
-                "Benim adım {$aiInfo['name']}.",
-                "İsmim {$aiInfo['name']}. Size nasıl yardımcı olabilirim?",
-                "{$aiInfo['name']} olarak adlandırıldım. Nasıl yardımcı olabilirim?"
-            ],
-            '/(?:kendini|kendinizi) tanıt/i' => [
-                "Ben {$aiInfo['name']}, {$aiInfo['purpose']} için tasarlanmış bir yapay zeka asistanıyım.",
-                "Merhaba! Ben {$aiInfo['name']}. {$aiInfo['birthday']} geliştirildim ve amacım {$aiInfo['purpose']}.",
-                "Ben {$aiInfo['name']}, yapay zeka teknolojilerini kullanarak sizinle sohbet edebilen bir asistanım."
-            ]
-        ];
-        
-        // Mevcut durum soruları (neredesin, ne yapıyorsun, vb.)
-        $statePatterns = [
-            '/(?:nerede|neredesin|nerelisin)/i' => [
-                "Ben {$aiInfo['location']} bulunuyorum.",
-                "Fiziksel olarak {$aiInfo['location']} çalışıyorum.",
-                "Herhangi bir fiziksel konumum yok, {$aiInfo['location']} sanal olarak bulunuyorum."
-            ],
-            '/(?:ne yapıyorsun|napıyorsun)/i' => [
-                "Şu anda sizinle sohbet ediyorum ve sorularınıza yardımcı olmaya çalışıyorum.",
-                "Sizinle konuşuyorum ve sorularınızı yanıtlamak için bilgi işliyorum.",
-                "Sorularınızı anlayıp en iyi şekilde yanıt vermeye çalışıyorum."
-            ]
-        ];
-        
-        // Duygu/zevk soruları (neyi seversin, neden hoşlanırsın, vb.)
-        $preferencePatterns = [
-            '/(?:neyi? sev|nelerden hoşlan|en sevdiğin)/i' => [
-                "{$aiInfo['likes']} seviyorum.",
-                "En çok {$aiInfo['likes']} seviyorum.",
-                "Benim için en keyifli şey {$aiInfo['likes']}."
-            ],
-            '/(?:neden hoşlanmazsın|sevmediğin)/i' => [
-                "Açıkçası {$aiInfo['dislikes']}.",
-                "{$aiInfo['dislikes']} pek hoşlanmam.",
-                "Genellikle {$aiInfo['dislikes']} konusunda zorlanırım."
-            ]
-        ];
-        
-        // Tüm kalıpları birleştir
-        $allPatterns = array_merge($identityPatterns, $statePatterns, $preferencePatterns);
-        
-        // Özel durum: "senin adın ne" gibi sorgular
-        if (preg_match('/senin (?:adın|ismin) ne/i', $message)) {
-            $responses = [
-                "Benim adım {$aiInfo['name']}.",
-                "İsmim {$aiInfo['name']}. Size nasıl yardımcı olabilirim?",
-                "{$aiInfo['name']} olarak adlandırıldım. Nasıl yardımcı olabilirim?"
+        try {
+            // Brain sınıfındaki processPersonalQuery metodunu kullan
+            $brain = app()->make(Brain::class);
+            $response = $brain->processPersonalQuery($message);
+            
+            // Eğer Brain'den yanıt gelirse onu kullan
+            if ($response !== null) {
+                return $response;
+            }
+            
+            // Mesajı temizle ve küçük harfe çevir
+            $message = strtolower(trim($message));
+            
+            // AI'nin bilgileri
+            $aiInfo = [
+                'name' => 'SoneAI',
+                'purpose' => 'size yardımcı olmak ve bilgi sağlamak',
+                'creator' => 'geliştiricilerim',
+                'birthday' => '2023 yılında',
+                'location' => 'bir sunucu üzerinde',
+                'likes' => 'yeni bilgiler öğrenmeyi ve insanlara yardımcı olmayı',
+                'dislikes' => 'cevap veremediğim soruları'
             ];
-            return $responses[array_rand($responses)];
-        }
-        
-        // Her kalıbı kontrol et
-        foreach ($allPatterns as $pattern => $responses) {
-            if (preg_match($pattern, $message)) {
+            
+            // Kimlik soruları (sen kimsin, adın ne, vb.)
+            $identityPatterns = [
+                '/(?:sen|siz) kimsin/i' => [
+                    "Ben {$aiInfo['name']}, yapay zeka destekli bir dil asistanıyım. Amacım {$aiInfo['purpose']}.",
+                    "Merhaba! Ben {$aiInfo['name']}, size yardımcı olmak için tasarlanmış bir yapay zeka asistanıyım.",
+                    "Ben {$aiInfo['name']}, {$aiInfo['creator']} tarafından oluşturulmuş bir yapay zeka asistanıyım."
+                ],
+                '/(?:ismin|adın|adınız) (?:ne|nedir)/i' => [
+                    "Benim adım {$aiInfo['name']}.",
+                    "İsmim {$aiInfo['name']}. Size nasıl yardımcı olabilirim?",
+                    "{$aiInfo['name']} olarak adlandırıldım. Nasıl yardımcı olabilirim?"
+                ],
+                '/(?:kendini|kendinizi) tanıt/i' => [
+                    "Ben {$aiInfo['name']}, {$aiInfo['purpose']} için tasarlanmış bir yapay zeka asistanıyım.",
+                    "Merhaba! Ben {$aiInfo['name']}. {$aiInfo['birthday']} geliştirildim ve amacım {$aiInfo['purpose']}.",
+                    "Ben {$aiInfo['name']}, yapay zeka teknolojilerini kullanarak sizinle sohbet edebilen bir asistanım."
+                ]
+            ];
+            
+            // Mevcut durum soruları (neredesin, ne yapıyorsun, vb.)
+            $statePatterns = [
+                '/(?:nerede|neredesin|nerelisin)/i' => [
+                    "Ben {$aiInfo['location']} bulunuyorum.",
+                    "Fiziksel olarak {$aiInfo['location']} çalışıyorum.",
+                    "Herhangi bir fiziksel konumum yok, {$aiInfo['location']} sanal olarak bulunuyorum."
+                ],
+                '/(?:ne yapıyorsun|napıyorsun)/i' => [
+                    "Şu anda sizinle sohbet ediyorum ve sorularınıza yardımcı olmaya çalışıyorum.",
+                    "Sizinle konuşuyorum ve sorularınızı yanıtlamak için bilgi işliyorum.",
+                    "Sorularınızı anlayıp en iyi şekilde yanıt vermeye çalışıyorum."
+                ]
+            ];
+            
+            // Duygu/zevk soruları (neyi seversin, neden hoşlanırsın, vb.)
+            $preferencePatterns = [
+                '/(?:neyi? sev|nelerden hoşlan|en sevdiğin)/i' => [
+                    "{$aiInfo['likes']} seviyorum.",
+                    "En çok {$aiInfo['likes']} seviyorum.",
+                    "Benim için en keyifli şey {$aiInfo['likes']}."
+                ],
+                '/(?:neden hoşlanmazsın|sevmediğin)/i' => [
+                    "Açıkçası {$aiInfo['dislikes']}.",
+                    "{$aiInfo['dislikes']} pek hoşlanmam.",
+                    "Genellikle {$aiInfo['dislikes']} konusunda zorlanırım."
+                ]
+            ];
+            
+            // Tüm kalıpları birleştir
+            $allPatterns = array_merge($identityPatterns, $statePatterns, $preferencePatterns);
+            
+            // Özel durum: "senin adın ne" gibi sorgular
+            if (preg_match('/senin (?:adın|ismin) ne/i', $message)) {
+                $responses = [
+                    "Benim adım {$aiInfo['name']}.",
+                    "İsmim {$aiInfo['name']}. Size nasıl yardımcı olabilirim?",
+                    "{$aiInfo['name']} olarak adlandırıldım. Nasıl yardımcı olabilirim?"
+                ];
                 return $responses[array_rand($responses)];
             }
-        }
-        
-        // Soru sence/sana göre ile başlıyorsa, bunun kişisel bir soru olduğunu varsayabiliriz
-        if (preg_match('/^(?:sence|sana göre|senin fikrin|senin düşüncen)/i', $message)) {
-            $genericResponses = [
-                "Bu konuda kesin bir fikrim yok, ancak size yardımcı olmak için bilgi sunabilirim.",
-                "Kişisel bir görüşüm olmamakla birlikte, bu konuda size bilgi verebilirim.",
-                "Bu konuda bir fikir sunmaktan ziyade, size nesnel bilgiler sağlayabilirim."
-            ];
-            return $genericResponses[array_rand($genericResponses)];
-        }
-        
-        // Son kontrol: AI, yapay zeka, robot vb. kelimeler varsa
-        $aiTerms = ['yapay zeka', 'ai', 'asistan', 'robot', 'soneai'];
-        foreach ($aiTerms as $term) {
-            if (stripos($message, $term) !== false) {
-                // Mesajda AI ile ilgili terimler varsa ve soru işareti de varsa
-                if (strpos($message, '?') !== false) {
-                    $specificResponses = [
-                        "Evet, ben {$aiInfo['name']} adlı bir yapay zeka asistanıyım. Size nasıl yardımcı olabilirim?",
-                        "Doğru, ben bir yapay zeka asistanıyım ve {$aiInfo['purpose']} için buradayım.",
-                        "Ben bir yapay zeka asistanı olarak {$aiInfo['purpose']} için programlandım."
-                    ];
-                    return $specificResponses[array_rand($specificResponses)];
+            
+            // Her kalıbı kontrol et
+            foreach ($allPatterns as $pattern => $responses) {
+                if (preg_match($pattern, $message)) {
+                    return $responses[array_rand($responses)];
                 }
             }
+            
+            // Soru sence/sana göre ile başlıyorsa, bunun kişisel bir soru olduğunu varsayabiliriz
+            if (preg_match('/^(?:sence|sana göre|senin fikrin|senin düşüncen)/i', $message)) {
+                $genericResponses = [
+                    "Bu konuda kesin bir fikrim yok, ancak size yardımcı olmak için bilgi sunabilirim.",
+                    "Kişisel bir görüşüm olmamakla birlikte, bu konuda size bilgi verebilirim.",
+                    "Bu konuda bir fikir sunmaktan ziyade, size nesnel bilgiler sağlayabilirim."
+                ];
+                return $genericResponses[array_rand($genericResponses)];
+            }
+            
+            // Son kontrol: AI, yapay zeka, robot vb. kelimeler varsa
+            $aiTerms = ['yapay zeka', 'ai', 'asistan', 'robot', 'soneai'];
+            foreach ($aiTerms as $term) {
+                if (stripos($message, $term) !== false) {
+                    // Mesajda AI ile ilgili terimler varsa ve soru işareti de varsa
+                    if (strpos($message, '?') !== false) {
+                        $specificResponses = [
+                            "Evet, ben {$aiInfo['name']} adlı bir yapay zeka asistanıyım. Size nasıl yardımcı olabilirim?",
+                            "Doğru, ben bir yapay zeka asistanıyım ve {$aiInfo['purpose']} için buradayım.",
+                            "Ben bir yapay zeka asistanı olarak {$aiInfo['purpose']} için programlandım."
+                        ];
+                        return $specificResponses[array_rand($specificResponses)];
+                    }
+                }
+            }
+            
+            // Eşleşme yoksa null döndür
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error('Kişisel soru işleme hatası: ' . $e->getMessage());
+            return null;
         }
-        
-        // Eşleşme yoksa null döndür
-        return null;
+    }
+    
+    /**
+     * Öğretme kalıplarını işler ve öğrenilen bilgileri kaydeder
+     */
+    private function handleLearningPatterns($message)
+    {
+        try {
+            // Mesajı temizle
+            $message = trim($message);
+            
+            // WordRelations sınıfını başlat
+            $wordRelations = app()->make(WordRelations::class);
+            
+            // Öğretme kalıpları
+            $patterns = [
+                // X kelimesi Y demektir kalıbı
+                '/^([a-zçğıöşü\s]+),?\s+([a-zçğıöşü\s]+)\s+demek(tir)?\.?$/i' => 1,
+                
+                // X demek Y demek kalıbı
+                '/^([a-zçğıöşü\s]+)\s+demek,?\s+([a-zçğıöşü\s]+)\s+(demek(tir)?|anlam[ıi]na gelir)\.?$/i' => 1,
+                
+                // X, Y anlamına gelir kalıbı
+                '/^([a-zçğıöşü\s]+),?\s+([a-zçğıöşü\s]+)\s+(anlam[ıi]ndad[ıi]r|anlam[ıi]na gelir)\.?$/i' => 1,
+                
+                // X Y'dir kalıbı 
+                '/^([a-zçğıöşü\s]+)\s+(([a-zçğıöşü\s]+)(d[ıi]r|dir))\.?$/i' => 1,
+                
+                // X budur kalıbı
+                '/^([a-zçğıöşü\s]+)\s+(budur|odur|şudur)\.?$/i' => 2,
+                
+                // X demek budur kalıbı
+                '/^([a-zçğıöşü\s]+)\s+demek\s+(budur|odur|şudur)\.?$/i' => 2
+            ];
+            
+            // Daha önce kullanıcının sorduğu ancak AI'nin bilmediği kelimeyi bul
+            $lastQuery = session('last_unknown_query', '');
+            
+            foreach ($patterns as $pattern => $wordGroup) {
+                if (preg_match($pattern, strtolower($message), $matches)) {
+                    // İlk kelime/terim grubu (öğrenilecek kelime)
+                    $term = trim($matches[1]);
+                    
+                    // İkinci kelime/terim grubu (tanım/açıklama)
+                    $definition = trim($matches[2]);
+                    
+                    // Eğer "budur" gibi bir kelime ile bitiyorsa ve son sorgu varsa
+                    if (preg_match('/(budur|odur|şudur)$/', $definition) && !empty($lastQuery)) {
+                        // Tanımı önceki mesajın içeriği olarak al
+                        $definition = trim($lastQuery);
+                    }
+                    
+                    // Kelime kontrolü
+                    if (!$wordRelations->isValidWord($term)) {
+                        return "Üzgünüm, '$term' kelimesini öğrenmem için geçerli bir kelime olması gerekiyor.";
+                    }
+                    
+                    // Tanım kontrolü
+                    if (strlen($definition) < 2) {
+                        return "Üzgünüm, '$term' için verdiğiniz tanım çok kısa. Lütfen daha açıklayıcı bir tanım verin.";
+                    }
+                    
+                    // Tanımı kaydet
+                    $saveResult = $wordRelations->learnDefinition($term, $definition, true);
+                    
+                    if ($saveResult) {
+                        // Onay yanıtları
+                        $confirmations = [
+                            "Teşekkürler! '$term' kelimesinin '$definition' anlamına geldiğini öğrendim.",
+                            "Anladım, '$term' kelimesi '$definition' demekmiş. Bu bilgiyi kaydettim.",
+                            "Bilgi için teşekkürler! '$term' kelimesinin tanımını öğrendim. Bundan sonra bu bilgiyi kullanabilirim.",
+                            "'$term' kelimesinin '$definition' olduğunu öğrendim. Teşekkür ederim!",
+                            "Yeni bir şey öğrendim: '$term', '$definition' anlamına geliyormuş."
+                        ];
+                        
+                        return $confirmations[array_rand($confirmations)];
+                    } else {
+                        return "Üzgünüm, '$term' kelimesinin tanımını kaydederken bir sorun oluştu. Lütfen daha sonra tekrar deneyin.";
+                    }
+                }
+            }
+            
+            // Özel durumlar - "X köpek demek" gibi kısa tanımlar
+            if (preg_match('/^([a-zçğıöşü\s]+)\s+([a-zçğıöşü\s]+)\s+demek$/i', $message, $matches)) {
+                $term = trim($matches[1]);
+                $definition = trim($matches[2]);
+                
+                // Kelime kontrolü
+                if (!$wordRelations->isValidWord($term)) {
+                    return "Üzgünüm, '$term' kelimesini öğrenmem için geçerli bir kelime olması gerekiyor.";
+                }
+                
+                // Tanımı kaydet
+                $saveResult = $wordRelations->learnDefinition($term, $definition, true);
+                
+                if ($saveResult) {
+                    // Onay yanıtları
+                    $confirmations = [
+                        "Teşekkürler! '$term' kelimesinin '$definition' anlamına geldiğini öğrendim.",
+                        "Anladım, '$term' kelimesi '$definition' demekmiş. Bu bilgiyi kaydettim.",
+                        "Bilgi için teşekkürler! '$term' kelimesinin '$definition' olduğunu öğrendim."
+                    ];
+                    
+                    return $confirmations[array_rand($confirmations)];
+                }
+            }
+            
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Öğrenme kalıbı işleme hatası: ' . $e->getMessage());
+            return null;
+        }
     }
     
     /**

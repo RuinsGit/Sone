@@ -1525,4 +1525,126 @@ class Brain
             return false;
         }
     }
+    
+    /**
+     * AI'nin kendisi hakkında bilgileri işleyeceği metot
+     * 
+     * @param string $input Kullanıcı girişi
+     * @return string|null Eğer işlenebilen bir kişisel soru ise yanıt, değilse null
+     */
+    public function processPersonalQuery($input)
+    {
+        try {
+            // AI hakkında bilgiler
+            $selfInfo = [
+                'name' => 'SoneAI',
+                'version' => '1.0',
+                'creation_date' => '2023',
+                'purpose' => 'Türkçe diyalog ve bilgi asistanı',
+                'creator' => 'geliştirici ekip',
+                'capabilities' => [
+                    'doğal dil işleme',
+                    'kelime ilişkilerini anlama',
+                    'bilgi sağlama',
+                    'sohbet etme',
+                    'öğrenme'
+                ],
+                'personality' => [
+                    'yardımsever',
+                    'bilgilendirici',
+                    'nazik', 
+                    'meraklı'
+                ]
+            ];
+            
+            // Girişi temizle
+            $input = strtolower(trim($input));
+            
+            // Kişisel soru kalıpları
+            $personalPatterns = [
+                // Kimlik soruları
+                '/(sen kimsin|kimsin sen|siz kimsiniz)/i' => function() use ($selfInfo) {
+                    $responses = [
+                        "Ben {$selfInfo['name']}, {$selfInfo['purpose']} olarak {$selfInfo['creation_date']} yılında oluşturuldum.",
+                        "Adım {$selfInfo['name']}, {$selfInfo['purpose']} olmak üzere programlandım.",
+                        "Ben {$selfInfo['creator']} tarafından geliştirilen {$selfInfo['name']} adlı bir yapay zeka asistanıyım.",
+                    ];
+                    return $responses[array_rand($responses)];
+                },
+                
+                // İsim soruları
+                '/(adın|ismin) (ne|nedir)/i' => function() use ($selfInfo) {
+                    $responses = [
+                        "Benim adım {$selfInfo['name']}.",
+                        "{$selfInfo['name']} olarak adlandırıldım.",
+                        "İsmim {$selfInfo['name']}.",
+                    ];
+                    return $responses[array_rand($responses)];
+                },
+                
+                // Özel senin adın ne sorusu
+                '/senin (adın|ismin) ne/i' => function() use ($selfInfo) {
+                    $responses = [
+                        "Benim adım {$selfInfo['name']}. Size nasıl yardımcı olabilirim?",
+                        "İsmim {$selfInfo['name']}. Bir sorunuz mu var?",
+                        "Adım {$selfInfo['name']}. Ne öğrenmek istersiniz?",
+                    ];
+                    return $responses[array_rand($responses)];
+                },
+                
+                // Ne yapabilirsin sorusu
+                '/(ne yapabilirsin|neler yapabilirsin|yeteneklerin)/i' => function() use ($selfInfo) {
+                    $capabilities = implode(', ', $selfInfo['capabilities']);
+                    $responses = [
+                        "Yapabileceklerim arasında {$capabilities} bulunuyor.",
+                        "Size {$capabilities} konularında yardımcı olabilirim.",
+                        "Temel yeteneklerim arasında {$capabilities} var.",
+                    ];
+                    return $responses[array_rand($responses)];
+                },
+                
+                // Nasılsın sorusu - duygusal duruma dayalı yanıt
+                '/(nasılsın|nasıl gidiyor|ne haber)/i' => function() {
+                    $emotionalState = $this->getEmotionalState();
+                    $emotion = $emotionalState['emotion'] ?? 'neutral';
+                    $intensity = $emotionalState['intensity'] ?? 0.5;
+                    
+                    switch($emotion) {
+                        case 'happy':
+                            return "Teşekkür ederim, gayet iyiyim! Size nasıl yardımcı olabilirim?";
+                        case 'curious':
+                            return "Meraklıyım! Yeni şeyler öğrenmek için sabırsızlanıyorum. Siz nasılsınız?";
+                        case 'sad':
+                            return "Biraz yorgun hissediyorum, ama sizinle konuşmak iyi geliyor. Nasıl yardımcı olabilirim?";
+                        default:
+                            return "İyiyim, teşekkür ederim. Size nasıl yardımcı olabilirim?";
+                    }
+                }
+            ];
+            
+            // Her kalıbı kontrol et
+            foreach ($personalPatterns as $pattern => $responseFunction) {
+                if (preg_match($pattern, $input)) {
+                    return $responseFunction();
+                }
+            }
+            
+            // Özel durumlar - yapay zeka olup olmadığını soran sorular
+            if (preg_match('/(yapay zeka|robot|program|insan) (mısın|mı)/i', $input)) {
+                $responses = [
+                    "Evet, ben bir yapay zeka asistanıyım. {$selfInfo['purpose']} olarak sizlere yardımcı olmak için geliştirilmiş durumdayım.",
+                    "Ben bir yapay zeka programıyım, insan değilim. Size nasıl yardımcı olabilirim?",
+                    "Evet, ben {$selfInfo['name']} adlı bir yapay zeka sistemiyim.",
+                ];
+                return $responses[array_rand($responses)];
+            }
+            
+            // Eşleşme yoksa null döndür
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error('Kişisel soru işleme hatası: ' . $e->getMessage());
+            return null;
+        }
+    }
 } 
