@@ -7,6 +7,7 @@ class EmotionEngine
     private $currentEmotion = 'neutral';
     private $emotionIntensity = 0;
     private $emotionHistory = [];
+    private $currentMood = 'normal';
     
     public function __construct()
     {
@@ -35,9 +36,13 @@ class EmotionEngine
         // Duygu durumunu güncelle
         $this->updateEmotionState($emotion, $intensity);
         
+        // Ruh halini güncelle
+        $this->updateMood();
+        
         return [
             'emotion' => $this->currentEmotion,
-            'intensity' => $this->emotionIntensity
+            'intensity' => $this->emotionIntensity,
+            'mood' => $this->currentMood
         ];
     }
     
@@ -85,11 +90,46 @@ class EmotionEngine
         $this->emotionHistory[$emotion]++;
     }
     
+    private function updateMood()
+    {
+        // Ruh halini güncelle - duygu tarihçesine göre
+        $totalEmotions = array_sum($this->emotionHistory);
+        
+        if ($totalEmotions > 0) {
+            $positiveRatio = ($this->emotionHistory['happy'] + $this->emotionHistory['surprised']) / $totalEmotions;
+            $negativeRatio = ($this->emotionHistory['sad'] + $this->emotionHistory['angry'] + $this->emotionHistory['fearful']) / $totalEmotions;
+            
+            if ($positiveRatio > 0.6) {
+                $this->currentMood = 'positive';
+            } else if ($negativeRatio > 0.6) {
+                $this->currentMood = 'negative';
+            } else {
+                $this->currentMood = 'normal';
+            }
+        }
+    }
+    
     public function getCurrentEmotion()
+    {
+        return $this->currentEmotion;
+    }
+    
+    public function getCurrentIntensity()
+    {
+        return $this->emotionIntensity;
+    }
+    
+    public function getCurrentMood()
+    {
+        return $this->currentMood;
+    }
+    
+    public function getEmotionalState()
     {
         return [
             'emotion' => $this->currentEmotion,
-            'intensity' => $this->emotionIntensity
+            'intensity' => $this->emotionIntensity,
+            'mood' => $this->currentMood
         ];
     }
     
@@ -103,6 +143,7 @@ class EmotionEngine
         $this->initializeEmotions();
         $this->currentEmotion = 'neutral';
         $this->emotionIntensity = 0;
+        $this->currentMood = 'normal';
     }
     
     public function setSensitivity($sensitivity)

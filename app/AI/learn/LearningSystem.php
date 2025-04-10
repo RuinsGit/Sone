@@ -2,630 +2,1080 @@
 
 namespace App\AI\Learn;
 
+use App\AI\Core\CategoryManager;
+use App\AI\Core\WordRelations;
 use App\Models\AIData;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 
 class LearningSystem
 {
-    private $isTraining = false;
-    private $learningRate = 0.1;
-    private $progress = 0;
-    private $lastTrainingTime;
-    private $knowledgeBase = [
-        'patterns' => [],
-        'rules' => [],
-        'concepts' => []
-    ];
+    private $categoryManager;
+    private $wordRelations;
+    private $apiKeys = [];
+    private $requestLimits = [];
+    private $errorLog = [];
+    private $isLearning = false;
+    private $wordLimit = 0;
+    private $wordsLearned = 0;
+    private $startTime = null;
+    private $language = 'tr';
     
-    public function __construct()
+    /**
+     * LearningSystem constructor.
+     * 
+     * @param CategoryManager $categoryManager
+     * @param WordRelations $wordRelations
+     */
+    public function __construct(CategoryManager $categoryManager, WordRelations $wordRelations)
     {
-        $this->lastTrainingTime = now();
-        $this->loadKnowledgeBase();
+        $this->categoryManager = $categoryManager;
+        $this->wordRelations = $wordRelations;
+        $this->loadApiKeys();
     }
     
     /**
-     * Öğrenme oranını ayarla
+     * API anahtarlarını yükle
      */
-    public function setLearningRate($rate)
+    private function loadApiKeys()
     {
-        $this->learningRate = max(0.01, min(1, (float)$rate));
-    }
-    
-    /**
-     * Bilgi tabanını yükle
-     */
-    private function loadKnowledgeBase()
-    {
-        $this->knowledgeBase = Cache::get('ai_knowledge_base', [
-            'patterns' => [],
-            'rules' => [],
-            'concepts' => []
-        ]);
-    }
-    
-    /**
-     * Bilgi tabanını kaydet
-     */
-    private function saveKnowledgeBase()
-    {
-        Cache::put('ai_knowledge_base', $this->knowledgeBase, now()->addWeek());
-    }
-    
-    /**
-     * Eğitim verilerini kullanarak sistemi eğit
-     */
-    public function train($trainingData = [])
-    {
-        $this->isTraining = true;
-        $this->progress = 0;
-        $totalItems = count($trainingData);
+        // Örnek API anahtarları (gerçek projede env dosyasından alınmalı)
+        $this->apiKeys = [
+            'tdk' => env('TDK_API_KEY', ''),
+            'google' => env('GOOGLE_API_KEY', ''),
+            'oxford' => env('OXFORD_API_KEY', ''),
+            'wiktionary' => env('WIKTIONARY_API_KEY', '')
+        ];
         
-        if (empty($trainingData)) {
-            // Varsayılan eğitim verisi yoksa veritabanından al
-            $trainingData = $this->getDefaultTrainingData();
-            $totalItems = count($trainingData);
-        }
-        
-        try {
-            foreach ($trainingData as $index => $data) {
-                // Her bir veri için öğrenme işlemi
-                $this->learnFromData($data);
-                
-                // İlerlemeyi güncelle
-                $this->progress = ($index + 1) / $totalItems;
-            }
-            
-            // Eğitim tamamlandı
-            $this->isTraining = false;
-            $this->lastTrainingTime = now();
-            $this->saveKnowledgeBase();
-            
-            return true;
-            
-        } catch (\Exception $e) {
-            $this->isTraining = false;
-            Log::error('Eğitim hatası: ' . $e->getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Tek bir veri öğesinden öğren
-     */
-    private function learnFromData($data)
-    {
-        if (!isset($data['input']) || empty($data['input'])) {
-            return;
-        }
-        
-        // Girdiden kalıplar çıkar
-        $patterns = $this->extractPatterns($data['input']);
-        
-        foreach ($patterns as $pattern) {
-            if (!isset($this->knowledgeBase['patterns'][$pattern])) {
-                $this->knowledgeBase['patterns'][$pattern] = [
-                    'frequency' => 0,
-                    'contexts' => [],
-                    'outputs' => []
-                ];
-            }
-            
-            // Frekansı artır
-            $this->knowledgeBase['patterns'][$pattern]['frequency']++;
-            
-            // Bağlamları kaydet
-            if (isset($data['context'])) {
-                $this->knowledgeBase['patterns'][$pattern]['contexts'][] = $data['context'];
-                // Maksimum 10 bağlam tut
-                $this->knowledgeBase['patterns'][$pattern]['contexts'] = array_slice(
-                    $this->knowledgeBase['patterns'][$pattern]['contexts'], 
-                    -10
-                );
-            }
-            
-            // Çıktıları kaydet
-            if (isset($data['output'])) {
-                $this->knowledgeBase['patterns'][$pattern]['outputs'][$data['output']] = 
-                    ($this->knowledgeBase['patterns'][$pattern]['outputs'][$data['output']] ?? 0) + 1;
-            }
-        }
-        
-        // Veritabanına kaydet
-        $this->storeToDatabase($data);
-    }
-    
-    /**
-     * Metinden kalıplar çıkar
-     */
-    public function extractPatterns($text)
-    {
-        $patterns = [];
-        
-        // Metni kelimelere ayır
-        $words = preg_split('/\s+/', strtolower($text));
-        
-        // Tek kelimeler
-        foreach ($words as $word) {
-            if (strlen($word) > 2) { // 2 harften uzun kelimeleri al
-                $patterns[] = $word;
-            }
-        }
-        
-        // İkili kelime grupları
-        for ($i = 0; $i < count($words) - 1; $i++) {
-            $pattern = $words[$i] . ' ' . $words[$i + 1];
-            $patterns[] = $pattern;
-        }
-        
-        return $patterns;
-    }
-    
-    /**
-     * Öğrenilen bilgileri veritabanına kaydet
-     */
-    private function storeToDatabase($data)
-    {
-        // Girdiden kelimeleri çıkar
-        $words = explode(' ', strtolower($data['input']));
-        
-        foreach ($words as $word) {
-            if (strlen($word) < 2) continue; // Çok kısa kelimeleri atla
-            
-            // Kelimeyi temizle
-            $word = trim($word);
-            
-            try {
-                // Kelimeyi veritabanına ekle veya güncelle
-                AIData::updateOrCreate(
-                    ['word' => $word],
-                    [
-                        'category' => $data['context']['category'] ?? 'general',
-                        'context' => $data['context']['context'] ?? null,
-                        'language' => 'tr'
-                    ]
-                );
-                
-                // Frekansı artır
-                DB::table('ai_data')
-                    ->where('word', $word)
-                    ->increment('frequency');
-                    
-            } catch (\Exception $e) {
-                Log::error('Kelime kaydetme hatası: ' . $e->getMessage());
-            }
-        }
-    }
-    
-    /**
-     * Varsayılan eğitim verilerini al
-     */
-    private function getDefaultTrainingData()
-    {
-        try {
-            $words = AIData::select('word', 'sentence', 'category', 'context')
-                ->where('language', 'tr')
-                ->where('frequency', '>', 0)
-                ->limit(200)
-                ->get();
-                
-            $trainingData = [];
-            
-            foreach ($words as $word) {
-                $trainingData[] = [
-                    'input' => $word->word,
-                    'output' => $word->sentence ?? $word->word,
-                    'context' => [
-                        'category' => $word->category,
-                        'context' => $word->context
-                    ]
-                ];
-            }
-            
-            return $trainingData;
-            
-        } catch (\Exception $e) {
-            Log::error('Eğitim verisi alma hatası: ' . $e->getMessage());
-            
-            // Hata durumunda basit veri seti döndür
-            return [
-                [
-                    'input' => 'öğrenme',
-                    'output' => 'Öğrenme sürecindeyim.',
-                    'context' => ['category' => 'learning']
-                ]
-            ];
-        }
-    }
-    
-    /**
-     * Benzer kalıpları bul
-     */
-    public function findSimilarPatterns($input)
-    {
-        $input = strtolower($input);
-        $patterns = $this->extractPatterns($input);
-        $foundPatterns = [];
-        
-        foreach ($patterns as $pattern) {
-            if (isset($this->knowledgeBase['patterns'][$pattern])) {
-                $foundPatterns[$pattern] = $this->knowledgeBase['patterns'][$pattern];
-            }
-        }
-        
-        // Cümleler oluşturmak için en sık kullanılan kalıpları al
-        if (!empty($foundPatterns)) {
-            $outputs = [];
-            
-            foreach ($foundPatterns as $pattern => $data) {
-                foreach ($data['outputs'] as $output => $frequency) {
-                    if (!isset($outputs[$output])) {
-                        $outputs[$output] = 0;
-                    }
-                    $outputs[$output] += $frequency;
-                }
-            }
-            
-            // Frekansa göre sırala
-            arsort($outputs);
-            
-            // En yüksek frekanslı çıktıları al
-            $topOutputs = array_slice($outputs, 0, 5, true);
-            
-            $results = [];
-            foreach ($topOutputs as $output => $frequency) {
-                $results[] = [
-                    'output' => $output,
-                    'frequency' => $frequency,
-                    'confidence' => min(1, $frequency / 10),
-                    'emotion' => 'neutral'
-                ];
-            }
-            
-            return $results;
-        }
-        
-        // Eğer hiç kalıp bulunamazsa veritabanından ara
-        return $this->searchInDatabase($input);
-    }
-    
-    /**
-     * Veritabanında ara
-     */
-    private function searchInDatabase($input)
-    {
-        $words = explode(' ', strtolower($input));
-        $results = [];
-        
-        foreach ($words as $word) {
-            if (strlen($word) < 3) continue;
-            
-            try {
-                $aiData = AIData::where('word', 'LIKE', "%{$word}%")
-                    ->whereNotNull('sentence')
-                    ->orderBy('frequency', 'desc')
-                    ->limit(3)
-                    ->get();
-                    
-                foreach ($aiData as $data) {
-                    if (!empty($data->sentence)) {
-                        $results[] = [
-                            'output' => $data->sentence,
-                            'frequency' => $data->frequency,
-                            'confidence' => min(1, $data->frequency / 20),
-                            'emotion' => 'neutral'
-                        ];
-                    }
-                }
-            } catch (\Exception $e) {
-                Log::error('Veritabanı arama hatası: ' . $e->getMessage());
-            }
-        }
-        
-        return $results;
-    }
-    
-    /**
-     * Öğrenme sistemini güncelle
-     */
-    public function update($input, $metadata = [])
-    {
-        // Girdiden öğren
-        $this->learnFromData([
-            'input' => $input,
-            'context' => $metadata['emotional_context'] ?? null,
-            'output' => $metadata['output'] ?? null
-        ]);
-        
-        return true;
-    }
-    
-    /**
-     * Eğitimi başlat
-     */
-    public function startTraining()
-    {
-        if ($this->isTraining) {
-            return false;
-        }
-        
-        // Otomatik eğitimi başlat
-        return $this->train();
-    }
-    
-    /**
-     * Durumu kontrol et
-     */
-    public function getStatus()
-    {
-        return [
-            'is_training' => $this->isTraining,
-            'progress' => $this->progress * 100, // Yüzde olarak
-            'last_training' => $this->lastTrainingTime ? $this->lastTrainingTime->diffForHumans() : 'Hiç',
-            'learning_rate' => $this->learningRate,
-            'knowledge_base_size' => [
-                'patterns' => count($this->knowledgeBase['patterns']),
-                'rules' => count($this->knowledgeBase['rules']),
-                'concepts' => count($this->knowledgeBase['concepts'])
+        // İstek limitleri
+        $this->requestLimits = [
+            'tdk' => [
+                'daily' => 1000,
+                'used' => 0,
+                'reset' => strtotime('tomorrow')
+            ],
+            'google' => [
+                'daily' => 100,
+                'used' => 0,
+                'reset' => strtotime('tomorrow')
+            ],
+            'oxford' => [
+                'daily' => 50,
+                'used' => 0,
+                'reset' => strtotime('tomorrow')
+            ],
+            'wiktionary' => [
+                'daily' => 500,
+                'used' => 0,
+                'reset' => strtotime('tomorrow')
             ]
         ];
     }
     
     /**
-     * İlerleme durumunu al
+     * Öğrenme işlemini başlat
+     * 
+     * @param int $wordLimit Öğrenilecek maksimum kelime sayısı
+     * @return array İşlem sonucu
+     */
+    public function startLearning($wordLimit = 100)
+    {
+        if ($this->isLearning) {
+            return [
+                'success' => false,
+                'message' => 'Öğrenme işlemi zaten devam ediyor.'
+            ];
+        }
+        
+        try {
+            $this->isLearning = true;
+            $this->wordLimit = $wordLimit;
+            $this->wordsLearned = 0;
+            $this->startTime = time();
+            $this->errorLog = [];
+            
+            // Öğrenilecek kelimeleri al
+            $words = $this->getWordsToLearn($wordLimit);
+            $totalWords = count($words);
+            
+            if ($totalWords == 0) {
+                $this->isLearning = false;
+                return [
+                    'success' => false,
+                    'message' => 'Öğrenilecek kelime bulunamadı.'
+                ];
+            }
+            
+            // Kelimeleri öğren
+            foreach ($words as $word) {
+                $result = $this->learnWord($word);
+                
+                if ($result['success']) {
+                    $this->wordsLearned++;
+                } else {
+                    $this->errorLog[] = [
+                        'word' => $word,
+                        'error' => $result['message']
+                    ];
+                }
+                
+                // Kelime limiti kontrolü
+                if ($this->wordsLearned >= $this->wordLimit) {
+                    break;
+                }
+            }
+            
+            $this->isLearning = false;
+            
+            return [
+                'success' => true,
+                'message' => $this->wordsLearned . ' kelime öğrenildi',
+                'learned' => $this->wordsLearned,
+                'total' => $totalWords,
+                'duration' => time() - $this->startTime,
+                'errors' => count($this->errorLog)
+            ];
+            
+        } catch (\Exception $e) {
+            $this->isLearning = false;
+            Log::error('Öğrenme başlatma hatası: ' . $e->getMessage());
+            
+            return [
+                'success' => false,
+                'message' => 'Öğrenme hatası: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * Belirli bir kelimeyi öğren
+     * 
+     * @param string $word Öğrenilecek kelime
+     * @return array İşlem sonucu
+     */
+    public function learnWord($word)
+    {
+        if (empty($word)) {
+            return [
+                'success' => false,
+                'message' => 'Kelime boş olamaz'
+            ];
+        }
+        
+        try {
+            // TDK'dan verileri topla
+            $tdkData = $this->collectFromTDK($word);
+            
+            // Wikipedia'dan verileri topla
+            $wikipediaData = $this->collectFromWikipedia($word);
+            
+            // Google'dan verileri topla
+            $googleData = $this->collectFromGoogle($word);
+            
+            // Toplanan verileri birleştir
+            $data = [
+                'definitions' => array_merge(
+                    $tdkData['definitions'] ?? [], 
+                    $wikipediaData['definitions'] ?? []
+                ),
+                'examples' => array_merge(
+                    $tdkData['examples'] ?? [], 
+                    $wikipediaData['examples'] ?? [], 
+                    $googleData['examples'] ?? []
+                ),
+                'synonyms' => array_merge(
+                    $tdkData['synonyms'] ?? [], 
+                    $wikipediaData['synonyms'] ?? [], 
+                    $googleData['synonyms'] ?? []
+                ),
+                'antonyms' => array_merge(
+                    $tdkData['antonyms'] ?? [], 
+                    $wikipediaData['antonyms'] ?? []
+                ),
+                'word_types' => array_merge(
+                    $tdkData['word_types'] ?? [], 
+                    $wikipediaData['word_types'] ?? []
+                ),
+                'related_words' => array_merge(
+                    $tdkData['related_words'] ?? [], 
+                    $wikipediaData['related_words'] ?? [],
+                    $googleData['related_words'] ?? []
+                ),
+                'search_results' => $googleData['search_results'] ?? []
+            ];
+            
+            // Kelimenin kategorilerini belirle
+            $categories = $this->determineCategories($word, $data);
+            
+            // Kelimenin ilişkilerini belirle
+            $relations = $this->determineRelations($word, $data);
+            
+            // Kelime frekansını ve önemini hesapla
+            $frequency = $this->calculateFrequency($word, $data);
+            $importance = $this->calculateImportance($word, $data, $categories);
+            
+            // Metadata oluştur
+            $metadata = [
+                'sources' => [
+                    'tdk' => !empty($tdkData),
+                    'wikipedia' => !empty($wikipediaData),
+                    'google' => !empty($googleData)
+                ],
+                'categories' => $categories,
+                'frequency' => $frequency,
+                'importance' => $importance,
+                'learned_at' => now()->toDateTimeString()
+            ];
+            
+            // Veritabanına kaydet
+            $this->saveWordData($word, $data, $metadata);
+            
+            // İlişkileri kaydet
+            foreach ($relations as $relation) {
+                switch ($relation['type']) {
+                    case 'synonym':
+                        $this->wordRelations->learnSynonym(
+                            $word, 
+                            $relation['word'], 
+                            $relation['strength']
+                        );
+                        break;
+                    case 'antonym':
+                        $this->wordRelations->learnAntonym(
+                            $word, 
+                            $relation['word'], 
+                            $relation['strength']
+                        );
+                        break;
+                    default:
+                        $this->wordRelations->learnAssociation(
+                            $word, 
+                            $relation['word'], 
+                            $relation['type'],
+                            $relation['strength']
+                        );
+                        break;
+                }
+            }
+            
+            return [
+                'success' => true,
+                'message' => 'Kelime başarıyla öğrenildi',
+                'data' => $data,
+                'metadata' => $metadata
+            ];
+            
+        } catch (\Exception $e) {
+            // Hatayı logla
+            Log::error('Kelime öğrenme hatası: ' . $e->getMessage());
+            
+            // Hatayı önbelleğe al
+            $this->cacheError($word, $e->getMessage());
+            
+            return [
+                'success' => false,
+                'message' => 'Kelime öğrenme hatası: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * TDK'dan verileri topla
+     * 
+     * @param string $word Kelime
+     * @return array Toplanan veriler
+     */
+    private function collectFromTDK($word)
+    {
+        try {
+            // İstek limitini kontrol et
+            if (!$this->checkRequestLimit('tdk')) {
+                return [];
+            }
+            
+            $url = "https://sozluk.gov.tr/gts?ara=" . urlencode($word);
+            $response = Http::get($url);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                // TDK cevabını ayrıştır
+                $result = [
+                    'definitions' => [],
+                    'examples' => [],
+                    'synonyms' => [],
+                    'antonyms' => [],
+                    'word_types' => [],
+                    'related_words' => []
+                ];
+                
+                if (isset($data[0]['anlamlarListe'])) {
+                    foreach ($data[0]['anlamlarListe'] as $meaning) {
+                        $result['definitions'][] = $meaning['anlam'];
+                        
+                        // Örnek cümleleri ekle
+                        if (isset($meaning['orneklerListe'])) {
+                            foreach ($meaning['orneklerListe'] as $example) {
+                                $result['examples'][] = $example['ornek'];
+                            }
+                        }
+                    }
+                }
+                
+                // Kelime türü
+                if (isset($data[0]['lisan'])) {
+                    $result['word_types'][] = $data[0]['lisan'];
+                }
+                
+                // Eş/Zıt anlamlılar varsa ekle
+                if (isset($data[0]['atasozu'])) {
+                    foreach ($data[0]['atasozu'] as $proverb) {
+                        $result['related_words'][] = $proverb['madde'];
+                    }
+                }
+                
+                return $result;
+            }
+            
+            return [];
+        } catch (\Exception $e) {
+            Log::error('TDK veri toplama hatası: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Wikipedia'dan verileri topla
+     * 
+     * @param string $word Kelime
+     * @return array Toplanan veriler
+     */
+    private function collectFromWikipedia($word)
+    {
+        try {
+            // İstek limitini kontrol et
+            if (!$this->checkRequestLimit('wiktionary', 'wikipedia')) {
+                return [];
+            }
+            
+            // Wikipedia API URL'i
+            $url = "https://tr.wikipedia.org/api/rest_v1/page/summary/" . urlencode($word);
+            $response = Http::get($url);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                $result = [
+                    'definitions' => [],
+                    'examples' => [],
+                    'synonyms' => [],
+                    'antonyms' => [],
+                    'word_types' => [],
+                    'related_words' => []
+                ];
+                
+                // Tanımı ekle
+                if (isset($data['extract'])) {
+                    $result['definitions'][] = $data['extract'];
+                }
+                
+                // İlgili başlıkları al
+                if (isset($data['title'])) {
+                    $relatedUrl = "https://tr.wikipedia.org/api/rest_v1/page/related/" . urlencode($data['title']);
+                    $relatedResponse = Http::get($relatedUrl);
+                    
+                    if ($relatedResponse->successful()) {
+                        $relatedData = $relatedResponse->json();
+                        
+                        if (isset($relatedData['pages'])) {
+                            foreach ($relatedData['pages'] as $page) {
+                                if (isset($page['title']) && $page['title'] != $word) {
+                                    $result['related_words'][] = $page['title'];
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return $result;
+            }
+            
+            return [];
+        } catch (\Exception $e) {
+            Log::error('Wikipedia veri toplama hatası: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Google'dan verileri topla
+     * 
+     * @param string $word Kelime
+     * @return array Toplanan veriler
+     */
+    private function collectFromGoogle($word)
+    {
+        try {
+            // İstek limitini kontrol et
+            if (!$this->checkRequestLimit('google')) {
+                return [];
+            }
+            
+            // API anahtarı kontrolü
+            $apiKey = $this->apiKeys['google'];
+            if (empty($apiKey)) {
+                return [];
+            }
+            
+            // Custom Search API URL'i
+            $cx = env('GOOGLE_SEARCH_CX', ''); // Özel arama motoru ID'si
+            $url = "https://www.googleapis.com/customsearch/v1?key=" . $apiKey . "&cx=" . $cx . "&q=" . urlencode($word);
+            
+            $response = Http::get($url);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                $result = [
+                    'examples' => [],
+                    'synonyms' => [],
+                    'related_words' => [],
+                    'search_results' => []
+                ];
+                
+                // Arama sonuçlarını ekle
+                if (isset($data['items'])) {
+                    foreach ($data['items'] as $item) {
+                        $result['search_results'][] = [
+                            'title' => $item['title'] ?? '',
+                            'snippet' => $item['snippet'] ?? '',
+                            'link' => $item['link'] ?? ''
+                        ];
+                        
+                        // Snippetları örnek olarak kullan
+                        if (isset($item['snippet']) && str_contains(strtolower($item['snippet']), strtolower($word))) {
+                            $result['examples'][] = $item['snippet'];
+                        }
+                    }
+                }
+                
+                return $result;
+            }
+            
+            return [];
+        } catch (\Exception $e) {
+            Log::error('Google veri toplama hatası: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Öğrenilecek kelimeleri getir
+     * 
+     * @param int $limit Kelime limiti
+     * @return array Kelime listesi
+     */
+    private function getWordsToLearn($limit = 100)
+    {
+        try {
+            // Öncelikle manuel eklenen kelimeleri kontrol et
+            $manualWords = Cache::get('manual_words_to_learn', []);
+            
+            // Eğer yeterli manuel kelime varsa, onları kullan
+            if (count($manualWords) >= $limit) {
+                return array_slice($manualWords, 0, $limit);
+            }
+            
+            // Manuel kelimeler + otomatik kelimeler
+            $remainingLimit = $limit - count($manualWords);
+            
+            // Otomatik kelimeleri topla
+            $automaticWords = $this->getAutomaticWordsToLearn($remainingLimit);
+            
+            return array_merge($manualWords, $automaticWords);
+        } catch (\Exception $e) {
+            Log::error('Öğrenilecek kelime getirme hatası: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Otomatik öğrenilecek kelimeleri getir
+     * 
+     * @param int $limit Kelime limiti
+     * @return array Kelime listesi
+     */
+    private function getAutomaticWordsToLearn($limit = 100)
+    {
+        // Öğrenilen ve öğrenilecek kelimeleri kontrol et
+        $learnedWords = AIData::pluck('word')->toArray();
+        $commonWords = $this->getCommonTurkishWords($limit * 2); // 2 kat fazla al, filtreleme sonrası yeterli olsun
+        
+        // Öğrenilmemiş kelimeleri filtrele
+        $wordsToLearn = array_filter($commonWords, function($word) use ($learnedWords) {
+            return !in_array($word, $learnedWords);
+        });
+        
+        return array_slice($wordsToLearn, 0, $limit);
+    }
+    
+    /**
+     * Yaygın Türkçe kelimeleri getir
+     * 
+     * @param int $limit Kelime limiti
+     * @return array Kelime listesi
+     */
+    private function getCommonTurkishWords($limit = 100)
+    {
+        // Önbellekten kontrol et
+        $cachedWords = Cache::get('common_turkish_words', []);
+        
+        if (!empty($cachedWords)) {
+            return array_slice($cachedWords, 0, $limit);
+        }
+        
+        // Temel kelimeler (gerçek uygulamada daha geniş bir liste olmalı)
+        $commonWords = [
+            'zaman', 'insan', 'yıl', 'yol', 'gün', 'hayat', 'el', 'göz', 'kadın', 'iş',
+            'su', 'çocuk', 'yer', 'baş', 'ev', 'dünya', 'yüz', 'anne', 'ülke', 'kitap',
+            'söz', 'baba', 'bilgi', 'kapı', 'ses', 'arkadaş', 'aile', 'güzel', 'sevgi', 'para',
+            'konu', 'durum', 'oda', 'sokak', 'okul', 'düşünce', 'iyi', 'gece', 'ağaç', 'masa',
+            'çalışma', 'pencere', 'bilgisayar', 'telefon', 'araba', 'kalem', 'hava', 'deniz', 'oyun', 'sanat',
+            'müzik', 'yemek', 'köy', 'şehir', 'dil', 'tarih', 'yaşam', 'doğa', 'kültür', 'sistem',
+            'hak', 'kişi', 'gelenek', 'öğrenci', 'öğretmen', 'duygu', 'anlam', 'sağlık', 'hastalık', 'hediye',
+            'sevmek', 'gitmek', 'gelmek', 'bakmak', 'anlamak', 'görmek', 'duymak', 'bilmek', 'istemek', 'yapmak',
+            'etmek', 'olmak', 'vermek', 'almak', 'konuşmak', 'okumak', 'yazmak', 'çalışmak', 'düşünmek', 'öğrenmek',
+            'büyük', 'küçük', 'uzun', 'kısa', 'genç', 'yaşlı', 'zengin', 'yoksul', 'güçlü', 'zayıf'
+        ];
+        
+        // Önbelleğe kaydet
+        Cache::put('common_turkish_words', $commonWords, now()->addDays(1));
+        
+        return array_slice($commonWords, 0, $limit);
+    }
+    
+    /**
+     * Kelimenin kategorilerini belirle
+     * 
+     * @param string $word Kelime
+     * @param array $data Toplanan veriler
+     * @return array Kategoriler
+     */
+    private function determineCategories($word, $data)
+    {
+        $categories = [];
+        
+        // Tanımlardan kategorileri çıkar
+        if (!empty($data['definitions'])) {
+            foreach ($data['definitions'] as $definition) {
+                $analysisResults = $this->categoryManager->analyzeText($definition);
+                
+                foreach ($analysisResults as $categoryId => $info) {
+                    if ($info['score'] > 0.3) {
+                        $categories[$categoryId] = $info['name'];
+                    }
+                }
+            }
+        }
+        
+        // Kelime türlerini kategori olarak değerlendir
+        if (!empty($data['word_types'])) {
+            foreach ($data['word_types'] as $type) {
+                // Kategori ID'sini bul veya oluştur
+                $categoryId = $this->categoryManager->getCategoryIdByName($type);
+                if ($categoryId) {
+                    $categories[$categoryId] = $type;
+                }
+            }
+        }
+        
+        return $categories;
+    }
+    
+    /**
+     * Kelimenin ilişkilerini belirle
+     * 
+     * @param string $word Kelime
+     * @param array $data Toplanan veriler
+     * @return array İlişkiler
+     */
+    private function determineRelations($word, $data)
+    {
+        $relations = [];
+        
+        // Eş anlamlıları ekle
+        if (!empty($data['synonyms'])) {
+            foreach ($data['synonyms'] as $synonym) {
+                $relations[] = [
+                    'word' => $synonym,
+                    'type' => 'synonym',
+                    'strength' => 0.9
+                ];
+            }
+        }
+        
+        // Zıt anlamlıları ekle
+        if (!empty($data['antonyms'])) {
+            foreach ($data['antonyms'] as $antonym) {
+                $relations[] = [
+                    'word' => $antonym,
+                    'type' => 'antonym',
+                    'strength' => 0.9
+                ];
+            }
+        }
+        
+        // İlişkili kelimeleri ekle
+        if (!empty($data['related_words'])) {
+            foreach ($data['related_words'] as $relatedWord) {
+                $relations[] = [
+                    'word' => $relatedWord,
+                    'type' => 'association',
+                    'strength' => 0.7
+                ];
+            }
+        }
+        
+        return $relations;
+    }
+    
+    /**
+     * Kelime frekansını hesapla
+     * 
+     * @param string $word Kelime
+     * @param array $data Toplanan veriler
+     * @return int Frekans
+     */
+    private function calculateFrequency($word, $data)
+    {
+        $frequency = 0;
+        
+        // Tanımların sayısına göre
+        $frequency += count($data['definitions']) * 5;
+        
+        // Örneklerin sayısına göre
+        $frequency += count($data['examples']) * 3;
+        
+        // Eş/zıt anlamlıların sayısına göre
+        $frequency += count($data['synonyms']) * 2;
+        $frequency += count($data['antonyms']) * 2;
+        
+        // İlişkili kelimelerin sayısına göre
+        $frequency += count($data['related_words']);
+        
+        // Arama sonuçlarının sayısına göre
+        $frequency += count($data['search_results']) * 2;
+        
+        return max(1, $frequency);
+    }
+    
+    /**
+     * Kelimenin önemini hesapla
+     * 
+     * @param string $word Kelime
+     * @param array $data Toplanan veriler
+     * @param array $categories Kategoriler
+     * @return float Önem
+     */
+    private function calculateImportance($word, $data, $categories)
+    {
+        $importance = 0.5; // Başlangıç değeri
+        
+        // Tanım sayısı
+        $definitionCount = count($data['definitions']);
+        if ($definitionCount > 0) {
+            $importance += min(0.2, $definitionCount * 0.05);
+        }
+        
+        // Kategori sayısı
+        $categoryCount = count($categories);
+        if ($categoryCount > 0) {
+            $importance += min(0.2, $categoryCount * 0.05);
+        }
+        
+        // İlişki sayısı
+        $relationCount = count($data['synonyms']) + count($data['antonyms']) + count($data['related_words']);
+        if ($relationCount > 0) {
+            $importance += min(0.1, $relationCount * 0.01);
+        }
+        
+        return min(1.0, $importance);
+    }
+    
+    /**
+     * Kelime verilerini veritabanına kaydet
+     * 
+     * @param string $word Kelime
+     * @param array $data Toplanan veriler
+     * @param array $metadata Metadata
+     * @return bool Başarı durumu
+     */
+    private function saveWordData($word, $data, $metadata)
+    {
+        try {
+            // AIData tablosuna kaydet
+            $aiData = AIData::updateOrCreate(
+                ['word' => $word],
+                [
+                    'sentence' => $data['definitions'][0] ?? null,
+                    'category' => array_values($metadata['categories'])[0] ?? 'genel',
+                    'context' => implode(', ', array_values($metadata['categories'])),
+                    'language' => $this->language,
+                    'frequency' => $metadata['frequency'],
+                    'confidence' => $metadata['importance'],
+                    'related_words' => json_encode(array_map(function($relation) {
+                        return $relation['word'];
+                    }, $this->determineRelations($word, $data))),
+                    'usage_examples' => json_encode($data['examples']),
+                    'emotional_context' => null,
+                    'metadata' => json_encode($metadata)
+                ]
+            );
+            
+            // Kelimeyi kategorilere ekle
+            foreach ($metadata['categories'] as $categoryId => $categoryName) {
+                $wordType = $data['word_types'][0] ?? null;
+                $this->categoryManager->addWordToCategory($word, $categoryId, $metadata['importance'], null, $wordType);
+            }
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Kelime verisi kaydetme hatası: ' . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * API istek limitini kontrol et
+     * 
+     * @param string $service Servis adı
+     * @return bool Limit aşılmadıysa true
+     */
+    private function checkRequestLimit($service, $fallbackService = null)
+    {
+        // Servis kontrolü
+        if (!isset($this->requestLimits[$service])) {
+            if ($fallbackService && isset($this->requestLimits[$fallbackService])) {
+                $service = $fallbackService;
+            } else {
+                return true; // Limit yoksa izin ver
+            }
+        }
+        
+        // Limiti kontrol et
+        $limit = $this->requestLimits[$service];
+        
+        // Reset time kontrolü
+        if (time() > $limit['reset']) {
+            // Limiti sıfırla
+            $this->requestLimits[$service]['used'] = 0;
+            $this->requestLimits[$service]['reset'] = strtotime('tomorrow');
+        }
+        
+        // Kullanım kontrolü
+        if ($limit['used'] >= $limit['daily']) {
+            Log::warning($service . ' API günlük limit aşıldı');
+            return false;
+        }
+        
+        // Kullanım sayısını artır
+        $this->requestLimits[$service]['used']++;
+        
+        return true;
+    }
+    
+    /**
+     * Hata mesajını önbelleğe al
+     * 
+     * @param string $word Kelime
+     * @param string $errorMessage Hata mesajı
+     */
+    private function cacheError($word, $errorMessage)
+    {
+        $errors = Cache::get('learning_errors', []);
+        $errors[$word] = [
+            'message' => $errorMessage,
+            'time' => now()->toDateTimeString()
+        ];
+        
+        // Son 100 hatayı tut
+        if (count($errors) > 100) {
+            $errors = array_slice($errors, -100, 100, true);
+        }
+        
+        Cache::put('learning_errors', $errors, now()->addDays(1));
+    }
+    
+    /**
+     * Durumu getir
+     * 
+     * @return array Durum bilgisi
+     */
+    public function getStatus()
+    {
+        return [
+            'isLearning' => $this->isLearning,
+            'wordLimit' => $this->wordLimit,
+            'wordsLearned' => $this->wordsLearned,
+            'startTime' => $this->startTime,
+            'duration' => $this->startTime ? time() - $this->startTime : 0,
+            'errorCount' => count($this->errorLog)
+        ];
+    }
+    
+    /**
+     * Öğrenme durumunu getir
+     * 
+     * @return array Durum bilgisi
+     */
+    public function getLearningStatus()
+    {
+        // Öğrenilen kelime sayısı
+        $wordCount = AIData::count();
+        
+        // Kategori sayısı
+        $categoryStats = $this->categoryManager->getStats();
+        
+        // İlişki sayısı
+        $relationStats = $this->wordRelations->getStats();
+        
+        return [
+            'word_count' => $wordCount,
+            'category_count' => $categoryStats['total_categories'] ?? 0,
+            'categorized_word_count' => $categoryStats['total_categorized_words'] ?? 0,
+            'relation_count' => ($relationStats['synonym_pairs'] ?? 0) + 
+                               ($relationStats['antonym_pairs'] ?? 0) + 
+                               ($relationStats['association_pairs'] ?? 0),
+            'synonym_count' => $relationStats['synonym_pairs'] ?? 0,
+            'antonym_count' => $relationStats['antonym_pairs'] ?? 0,
+            'association_count' => $relationStats['association_pairs'] ?? 0,
+            'definition_count' => $relationStats['definitions'] ?? 0,
+            'is_learning' => $this->isLearning,
+            'last_learned' => AIData::max('updated_at')
+        ];
+    }
+    
+    /**
+     * Manuel kelime ekle
+     * 
+     * @param array $words Kelimeler
+     * @return bool Başarı durumu
+     */
+    public function addManualWords($words)
+    {
+        try {
+            if (empty($words) || !is_array($words)) {
+                return false;
+            }
+            
+            // Mevcut manuel kelimeleri al
+            $manualWords = Cache::get('manual_words_to_learn', []);
+            
+            // Yeni kelimeleri ekle (tekrarları önle)
+            foreach ($words as $word) {
+                if (!in_array($word, $manualWords)) {
+                    $manualWords[] = $word;
+                }
+            }
+            
+            // Önbelleğe kaydet
+            Cache::put('manual_words_to_learn', $manualWords, now()->addDays(7));
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Manuel kelime ekleme hatası: ' . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Oxford API'dan verileri topla
+     * 
+     * @param string $word Kelime
+     * @return array Toplanan veriler
+     */
+    private function collectFromOxford($word)
+    {
+        try {
+            // İstek limitini kontrol et
+            if (!$this->checkRequestLimit('oxford')) {
+                return [];
+            }
+            
+            // API anahtarı kontrolü
+            $apiKey = $this->apiKeys['oxford'];
+            $appId = env('OXFORD_APP_ID', '');
+            if (empty($apiKey) || empty($appId)) {
+                return [];
+            }
+            
+            // Oxford API URL'i
+            $url = "https://od-api.oxforddictionaries.com/api/v2/entries/tr/" . urlencode($word);
+            
+            $response = Http::withHeaders([
+                'app_id' => $appId,
+                'app_key' => $apiKey
+            ])->get($url);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                $result = [
+                    'definitions' => [],
+                    'examples' => [],
+                    'synonyms' => [],
+                    'antonyms' => [],
+                    'word_types' => [],
+                    'related_words' => []
+                ];
+                
+                // Veriyi ayrıştır
+                if (isset($data['results'][0]['lexicalEntries'])) {
+                    foreach ($data['results'][0]['lexicalEntries'] as $lexicalEntry) {
+                        // Kelime türü
+                        if (isset($lexicalEntry['lexicalCategory']['text'])) {
+                            $result['word_types'][] = $lexicalEntry['lexicalCategory']['text'];
+                        }
+                        
+                        // Tanımlar ve örnekler
+                        if (isset($lexicalEntry['entries'][0]['senses'])) {
+                            foreach ($lexicalEntry['entries'][0]['senses'] as $sense) {
+                                if (isset($sense['definitions'])) {
+                                    foreach ($sense['definitions'] as $definition) {
+                                        $result['definitions'][] = $definition;
+                                    }
+                                }
+                                
+                                if (isset($sense['examples'])) {
+                                    foreach ($sense['examples'] as $example) {
+                                        $result['examples'][] = $example['text'];
+                                    }
+                                }
+                                
+                                // Eş/zıt anlamlılar
+                                if (isset($sense['synonyms'])) {
+                                    foreach ($sense['synonyms'] as $synonym) {
+                                        $result['synonyms'][] = $synonym['text'];
+                                    }
+                                }
+                                
+                                if (isset($sense['antonyms'])) {
+                                    foreach ($sense['antonyms'] as $antonym) {
+                                        $result['antonyms'][] = $antonym['text'];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return $result;
+            }
+            
+            return [];
+        } catch (\Exception $e) {
+            Log::error('Oxford veri toplama hatası: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Wiktionary'den verileri topla
+     * 
+     * @param string $word Kelime
+     * @return array Toplanan veriler
+     */
+    private function collectFromWiktionary($word)
+    {
+        try {
+            // İstek limitini kontrol et
+            if (!$this->checkRequestLimit('wiktionary')) {
+                return [];
+            }
+            
+            // Wiktionary API URL'i
+            $url = "https://tr.wiktionary.org/api/rest_v1/page/definition/" . urlencode($word);
+            $response = Http::get($url);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                $result = [
+                    'definitions' => [],
+                    'examples' => [],
+                    'synonyms' => [],
+                    'antonyms' => [],
+                    'word_types' => [],
+                    'related_words' => []
+                ];
+                
+                // Veriyi ayrıştır
+                if (isset($data['tr'])) {
+                    foreach ($data['tr'] as $entry) {
+                        if (isset($entry['partOfSpeech'])) {
+                            $result['word_types'][] = $entry['partOfSpeech'];
+                        }
+                        
+                        if (isset($entry['definitions'])) {
+                            foreach ($entry['definitions'] as $definition) {
+                                $result['definitions'][] = $definition['definition'];
+                                
+                                // Örnekler
+                                if (isset($definition['examples'])) {
+                                    foreach ($definition['examples'] as $example) {
+                                        $result['examples'][] = $example;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return $result;
+            }
+            
+            return [];
+        } catch (\Exception $e) {
+            Log::error('Wiktionary veri toplama hatası: ' . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Öğrenme ilerlemesini getir
+     * 
+     * @return array İlerleme bilgisi
      */
     public function getProgress()
     {
-        return $this->progress * 100; // Yüzde olarak
-    }
-    
-    /**
-     * Sürekli öğrenme işlemi
-     */
-    public function continuousLearning($options = [])
-    {
-        // Son eğitimden bu yana 5 dakika geçmediyse atlayalım
-        $lastTraining = $this->lastTrainingTime;
-        $limit = $options['limit'] ?? 100;
-        $force = $options['force'] ?? false;
+        // Öğrenilen kelime sayısı
+        $wordCount = AIData::count();
         
-        if (!$force && $lastTraining->diffInMinutes(now()) < 5) {
-            return [
-                'success' => false,
-                'message' => 'Son eğitimden bu yana yeterli süre geçmedi, atlıyoruz.'
-            ];
+        // Son öğrenilen kelime
+        $lastWord = AIData::orderBy('created_at', 'desc')->first();
+        
+        // Tahmini bitiş süresi hesapla
+        $estimatedEnd = null;
+        if ($this->isLearning && $this->wordsLearned > 0 && $this->startTime) {
+            $elapsedTime = time() - $this->startTime;
+            $avgTimePerWord = $elapsedTime / $this->wordsLearned;
+            $remainingWords = $this->wordLimit - $this->wordsLearned;
+            $remainingTime = $avgTimePerWord * $remainingWords;
+            $estimatedEnd = date('Y-m-d H:i:s', time() + $remainingTime);
         }
         
-        try {
-            // Öğrenilecek yeni veriler var mı kontrol edelim
-            $newData = AIData::where('updated_at', '>', $lastTraining)
-                ->limit($limit)
-                ->get();
-                
-            // Yeni veri yoksa rasgele veri seçelim
-            if ($newData->count() == 0) {
-                return $this->learnFromRandomData($limit);
-            }
-            
-            $learnedItems = 0;
-            $learnedPatterns = [];
-            $relations = [
-                'synonyms' => 0,
-                'antonyms' => 0,
-                'associations' => 0
-            ];
-            
-            $wordRelations = app(\App\AI\Core\WordRelations::class);
-            
-            foreach ($newData as $data) {
-                // Her veriyi öğrenme sistemine ekle
-                $this->learnFromData([
-                    'input' => $data->word,
-                    'output' => $data->sentence,
-                    'context' => [
-                        'category' => $data->category,
-                        'context' => $data->context
-                    ]
-                ]);
-                
-                // İlişkileri bul ve kur
-                if (!empty($data->sentence)) {
-                    // Kelime tanımlarını öğren
-                    $wordRelations->learnFromContextualData($data->word, ['category' => $data->category], $data->sentence);
-                    
-                    // Cümledeki diğer kelimeleri bul ve ilişkileri kur
-                    $words = $this->extractPatterns($data->sentence);
-                    foreach ($words as $relatedWord) {
-                        if ($relatedWord != $data->word) {
-                            $relationResult = $wordRelations->learnAssociation($data->word, $relatedWord, 'related', 0.4);
-                            if ($relationResult) {
-                                $relations['associations']++;
-                            }
-                        }
-                    }
-                }
-                
-                // Eş anlamlı ve zıt anlamlı kelimeleri bulmak için analiz yap
-                $this->analyzeForSynonymsAndAntonyms($data->word, $data->sentence, $wordRelations, $relations);
-                
-                $learnedItems++;
-                
-                // Öğrenilen kalıpları kaydet
-                $learnedPatterns[$data->word] = [
-                    'frequency' => $data->frequency ?? 1,
-                    'confidence' => min(1, ($data->frequency ?? 1) / 20)
-                ];
-            }
-            
-            // Bilgi tabanını güncelle
-            $this->lastTrainingTime = now();
-            $this->saveKnowledgeBase();
-            
-            return [
-                'success' => true,
-                'learned_items' => $learnedItems,
-                'patterns' => $learnedPatterns,
-                'relations' => $relations
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error('Sürekli öğrenme hatası: ' . $e->getMessage());
-            
-            return [
-                'success' => false,
-                'message' => 'Öğrenme sırasında hata: ' . $e->getMessage()
-            ];
-        }
-    }
-    
-    /**
-     * Rasgele verilerden öğren
-     */
-    private function learnFromRandomData($limit = 50)
-    {
-        try {
-            // Rasgele veri seç
-            $randomData = AIData::inRandomOrder()
-                ->limit($limit)
-                ->get();
-                
-            if ($randomData->count() == 0) {
-                return [
-                    'success' => false,
-                    'message' => 'Öğrenilecek veri bulunamadı.'
-                ];
-            }
-            
-            $learnedItems = 0;
-            $learnedPatterns = [];
-            $relations = [
-                'synonyms' => 0,
-                'antonyms' => 0,
-                'associations' => 0
-            ];
-            
-            $wordRelations = app(\App\AI\Core\WordRelations::class);
-            
-            foreach ($randomData as $data) {
-                // Her veriyi öğrenme sistemine ekle
-                $this->learnFromData([
-                    'input' => $data->word,
-                    'output' => $data->sentence,
-                    'context' => [
-                        'category' => $data->category,
-                        'context' => $data->context
-                    ]
-                ]);
-                
-                // İlişkileri bul ve kur
-                if (!empty($data->sentence)) {
-                    // Kelime tanımlarını öğren
-                    $wordRelations->learnFromContextualData($data->word, ['category' => $data->category], $data->sentence);
-                    
-                    // Cümledeki diğer kelimeleri bul ve ilişkileri kur
-                    $words = $this->extractPatterns($data->sentence);
-                    foreach ($words as $relatedWord) {
-                        if ($relatedWord != $data->word) {
-                            $relationResult = $wordRelations->learnAssociation($data->word, $relatedWord, 'related', 0.3);
-                            if ($relationResult) {
-                                $relations['associations']++;
-                            }
-                        }
-                    }
-                }
-                
-                // Eş anlamlı ve zıt anlamlı kelimeleri bulmak için analiz yap
-                $this->analyzeForSynonymsAndAntonyms($data->word, $data->sentence, $wordRelations, $relations);
-                
-                $learnedItems++;
-                
-                // Öğrenilen kalıpları kaydet
-                $learnedPatterns[$data->word] = [
-                    'frequency' => $data->frequency ?? 1,
-                    'confidence' => min(1, ($data->frequency ?? 1) / 20)
-                ];
-            }
-            
-            // Bilgi tabanını güncelle
-            $this->lastTrainingTime = now();
-            $this->saveKnowledgeBase();
-            
-            return [
-                'success' => true,
-                'learned_items' => $learnedItems,
-                'patterns' => $learnedPatterns,
-                'relations' => $relations,
-                'type' => 'random'
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error('Rasgele öğrenme hatası: ' . $e->getMessage());
-            
-            return [
-                'success' => false,
-                'message' => 'Rasgele öğrenme sırasında hata: ' . $e->getMessage()
-            ];
-        }
-    }
-    
-    /**
-     * Cümleyi analiz ederek eş anlamlı ve zıt anlamlı kelimeleri bulmaya çalışır
-     */
-    private function analyzeForSynonymsAndAntonyms($word, $sentence, $wordRelations, &$relations)
-    {
-        if (empty($sentence)) return;
-        
-        // Eş anlamlı kelime belirteçleri
-        $synonymPatterns = [
-            '/\byani\b/',
-            '/\beş anlamlı\b/',
-            '/\bgibi\b/',
-            '/\baynı\b/',
-            '/\bbenzer\b/',
-            '/\beşdeğer\b/'
+        return [
+            'is_learning' => $this->isLearning,
+            'word_limit' => $this->wordLimit,
+            'learned_count' => $this->wordsLearned,
+            'word_count' => $wordCount,
+            'progress_percent' => $this->wordLimit > 0 ? round(($this->wordsLearned / $this->wordLimit) * 100) : 0,
+            'start_time' => $this->startTime ? date('Y-m-d H:i:s', $this->startTime) : null,
+            'elapsed_time' => $this->startTime ? time() - $this->startTime : 0,
+            'estimated_end' => $estimatedEnd,
+            'last_word' => $lastWord ? $lastWord->word : null,
+            'error_count' => count($this->errorLog)
         ];
-        
-        // Zıt anlamlı kelime belirteçleri
-        $antonymPatterns = [
-            '/\bzıt\b/',
-            '/\bkarşıt\b/',
-            '/\baksi\b/',
-            '/\btersine\b/',
-            '/\bdeğil\b/'
-        ];
-        
-        // Kelime adaylarını bul
-        $candidates = preg_split('/[\s,;\.]+/', $sentence);
-        
-        // Eş anlamlı kontrolleri
-        foreach ($synonymPatterns as $pattern) {
-            if (preg_match($pattern, $sentence)) {
-                // Muhtemel eş anlamlı bulundu
-                foreach ($candidates as $candidate) {
-                    if (strlen($candidate) > 2 && $candidate != $word) {
-                        $result = $wordRelations->learnSynonym($word, $candidate, 0.6);
-                        if ($result) {
-                            $relations['synonyms']++;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Zıt anlamlı kontrolleri
-        foreach ($antonymPatterns as $pattern) {
-            if (preg_match($pattern, $sentence)) {
-                // Muhtemel zıt anlamlı bulundu
-                foreach ($candidates as $candidate) {
-                    if (strlen($candidate) > 2 && $candidate != $word) {
-                        $result = $wordRelations->learnAntonym($word, $candidate, 0.6);
-                        if ($result) {
-                            $relations['antonyms']++;
-                        }
-                    }
-                }
-            }
-        }
     }
-} 
+}

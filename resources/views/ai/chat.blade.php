@@ -125,7 +125,7 @@
                 
                 <!-- Sone düşünüyor animasyonu (kaldırılacak) -->
                 <div id="sone-thinking" class="sone-thinking" style="display: none;">
-                    <span>Sone düşünüyor</span>
+                    <span>Yaziyor</span>
                     <div class="dots">
                         <span></span>
                         <span></span>

@@ -2,247 +2,323 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use App\AI\Core\Brain;
 use App\Models\AIData;
-use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
+use App\Models\Chat;
+use App\Models\ChatMessage;
 
 class AIController extends Controller
 {
-    private $brain;
-    
-    public function __construct()
-    {
-        $this->brain = new Brain();
-    }
-    
-    public function processInput(Request $request)
+    /**
+     * Yapay zeka ile konuşma
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function chat(Request $request)
     {
         try {
-            $input = $request->input('message');
+            // Parametreleri doğrula
+            $request->validate([
+                'message' => 'required|string|max:1000',
+                'chat_id' => 'nullable|integer'
+            ]);
             
-            if(empty($input)) {
-                return response()->json([
-                    'success' => true,
-                    'response' => 'Mesaj boş olamaz, lütfen bir şeyler yazın.',
-                    'emotional_state' => $this->brain->getEmotionalState()
+            // Brain nesnesini oluştur
+            $brain = app(Brain::class);
+            
+            // Kullanıcı mesajı
+            $message = $request->input('message');
+            
+            // Sohbet kaydı
+            $chatId = $request->input('chat_id');
+            $chat = null;
+            
+            if ($chatId) {
+                $chat = Chat::find($chatId);
+            }
+            
+            if (!$chat) {
+                // Yeni sohbet oluştur
+                $chat = Chat::create([
+                    'user_id' => auth()->check() ? auth()->id() : null,
+                    'title' => substr($message, 0, 50),
+                    'status' => 'active'
                 ]);
             }
             
-            // Hata yakalama için try-catch bloğu
-            try {
-                // Yanıtı oluştur
-                $response = $this->brain->processInput($input);
-            } catch (\Exception $e) {
-                \Log::error('AI yanıt oluşturma hatası: ' . $e->getMessage() . ' - ' . $e->getTraceAsString());
-                
-                // WordRelations içeren hataları özel olarak işle
-                if (strpos($e->getMessage(), 'WordRelations') !== false || 
-                    strpos($e->getMessage(), 'word_relations') !== false) {
-                    
-                    // Öğrenme cümlesi formatı ("diyeceksin", "demelisin" içeren ifadeler)
-                    if (preg_match('/(".*?")|(\bdiyeceksin\b)|(\bdemelisin\b)|(\böğret\b)|(\böğretmek\b)/i', $input)) {
-                        return response()->json([
-                            'success' => true,
-                            'response' => "Bu bilgiyi öğrenmeye çalışıyorum. Teşekkür ederim, bu bilgiyi kaydettim ve ileride kullanacağım.",
-                            'emotional_state' => [
-                                'emotion' => 'happy',
-                                'intensity' => 0.7
-                            ]
-                        ]);
-                    }
-                    
-                    // Muhtemelen bilinmeyen bir kelime/kavram
-                    return response()->json([
-                        'success' => true,
-                        'response' => "Bu konu hakkında bilgim yok. Bana bu konuda biraz bilgi verebilir misiniz? Öğrenmeme yardımcı olun.",
-                        'emotional_state' => [
-                            'emotion' => 'curious',
-                            'intensity' => 0.8
-                        ]
-                    ]);
-                }
-                
-                // Genel hata durumu
-                $response = "Üzgünüm, işlem sırasında bir sorun oluştu. Lütfen tekrar deneyin veya başka bir şekilde ifade edin.";
-            }
-            
-            // Son aktiviteyi kaydet
-            $this->logActivity('Yeni mesaj işlendi: ' . substr($input, 0, 50) . '...');
-            
-            if(empty($response)) {
-                $response = "Üzgünüm, şu anda yanıt veremiyorum. Lütfen tekrar deneyin.";
-            }
-            
-            // Objeyse string'e dönüştür
-            if (is_array($response) || is_object($response)) {
-                if (isset($response['output'])) {
-                    $response = $response['output'];
-                } else {
-                    $response = "Merhaba, size nasıl yardımcı olabilirim?";
-                }
-            }
-            
-            return response()->json([
-                'success' => true,
-                'response' => $response,
-                'timestamp' => time(),
-                'emotional_state' => $this->brain->getEmotionalState()
+            // Kullanıcı mesajını kaydet
+            ChatMessage::create([
+                'chat_id' => $chat->id,
+                'content' => $message,
+                'sender' => 'user'
             ]);
             
-        } catch (\Exception $e) {
-            \Log::error('AI İşlem hatası: ' . $e->getMessage() . ' - ' . $e->getTraceAsString());
+            // Yapay zeka yanıtını al
+            $response = $brain->processInput($message);
             
-            // Özel hata mesajı oluştur
-            $errorMessage = "Üzgünüm, bir sorun oluştu. Lütfen tekrar deneyin.";
-            
-            // Öğrenme cümlesi formatı ("diyeceksin", "demelisin" içeren ifadeler)
-            if (!empty($input) && preg_match('/(".*?")|(\bdiyeceksin\b)|(\bdemelisin\b)|(\böğret\b)|(\böğretmek\b)/i', $input)) {
-                $errorMessage = "Bu bilgiyi öğrenmeye çalışıyorum. Teşekkür ederim, bu bilgiyi kaydettim ve ileride kullanacağım.";
-            }
+            // AI mesajını kaydet
+            ChatMessage::create([
+                'chat_id' => $chat->id,
+                'content' => $response,
+                'sender' => 'ai'
+            ]);
             
             return response()->json([
                 'success' => true,
-                'response' => $errorMessage,
-                'emotional_state' => [
-                    'emotion' => 'sad',
-                    'intensity' => 0.5
+                'data' => [
+                    'chat_id' => $chat->id,
+                    'response' => $response
                 ]
             ]);
+        } catch (\Exception $e) {
+            Log::error('AI yanıt hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'AI yanıt hatası: ' . $e->getMessage()
+            ], 500);
         }
     }
     
+    /**
+     * Bir kelime hakkında bilgi al
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getWordInfo(Request $request)
+    {
+        try {
+            // Parametreleri doğrula
+            $request->validate([
+                'word' => 'required|string|min:2|max:100'
+            ]);
+            
+            // Brain nesnesini oluştur
+            $brain = app(Brain::class);
+            
+            // Kelime bilgisini al
+            $wordInfo = $brain->getWordRelations($request->input('word'));
+            
+            return response()->json([
+                'success' => true,
+                'data' => $wordInfo
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Kelime bilgisi alma hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Kelime bilgisi alma hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Öğrenme durumunu getir
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getLearningStatus()
+    {
+        try {
+            // Brain nesnesini oluştur
+            $brain = app(Brain::class);
+            
+            // Öğrenme sistemi var mı kontrol et
+            $learningSystem = $brain->getLearningSystem();
+            
+            if (!$learningSystem) {
+                Log::warning('Öğrenme sistemi bulunamadı');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Öğrenme sistemi başlatılmadı'
+                ]);
+            }
+            
+            try {
+                // Öğrenme durumunu al
+                $status = $brain->getLearningStatus();
+                
+                return response()->json([
+                    'success' => true,
+                    'data' => $status
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Öğrenme durumu alma hatası: ' . $e->getMessage());
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Öğrenme durumu alma hatası: ' . $e->getMessage()
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Brain oluşturma hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Sistem hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Yapay zeka hakkında genel durum bilgisi
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAIStatus()
+    {
+        try {
+            // Brain nesnesini oluştur
+            $brain = app(Brain::class);
+            
+            // Durum bilgilerini al
+            $status = [
+                'memory' => $brain->getMemoryStatus(),
+                'emotion' => $brain->getEmotionalState(),
+                'learning' => $brain->getLearningStatus(),
+                'consciousness' => $brain->getConsciousnessState(),
+                'words_learned' => AIData::count()
+            ];
+            
+            return response()->json([
+                'success' => true,
+                'data' => $status
+            ]);
+        } catch (\Exception $e) {
+            Log::error('AI durum bilgisi alma hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'AI durum bilgisi alma hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Kelime araması yap
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function searchWords(Request $request)
+    {
+        try {
+            // Parametreleri doğrula
+            $request->validate([
+                'query' => 'required|string|min:2|max:100',
+                'limit' => 'nullable|integer|min:1|max:100'
+            ]);
+            
+            // Arama parametreleri
+            $query = $request->input('query');
+            $limit = $request->input('limit', 20);
+            
+            // Kelime araması yap
+            $words = AIData::where('word', 'like', "%$query%")
+                ->orWhere('sentence', 'like', "%$query%")
+                ->orWhere('category', 'like', "%$query%")
+                ->orderBy('frequency', 'desc')
+                ->limit($limit)
+                ->get(['word', 'category', 'frequency', 'confidence']);
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'query' => $query,
+                    'count' => $words->count(),
+                    'words' => $words
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Kelime arama hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Kelime arama hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Sohbet geçmişini getir
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getChatHistory(Request $request)
+    {
+        try {
+            // Parametreleri doğrula
+            $request->validate([
+                'chat_id' => 'required|integer'
+            ]);
+            
+            // Sohbet kaydını al
+            $chat = Chat::with(['messages' => function($query) {
+                $query->orderBy('created_at', 'asc');
+            }])->find($request->input('chat_id'));
+            
+            if (!$chat) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sohbet bulunamadı'
+                ], 404);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'data' => $chat
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Sohbet geçmişi alma hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Sohbet geçmişi alma hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Kullanıcı sohbetlerini listele
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getUserChats()
+    {
+        try {
+            // Kullanıcı ID'sine göre sohbetleri getir
+            $userId = auth()->check() ? auth()->id() : null;
+            
+            $chats = Chat::where('user_id', $userId)
+                ->orderBy('updated_at', 'desc')
+                ->get(['id', 'title', 'status', 'created_at', 'updated_at']);
+            
+            return response()->json([
+                'success' => true,
+                'data' => $chats
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Kullanıcı sohbetleri listeleme hatası: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Kullanıcı sohbetleri listeleme hatası: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Yapay zeka durumunu getir (getAIStatus'a yönlendir)
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function getStatus()
     {
-        try {
-            $memoryStatus = $this->brain->getMemoryStatus();
-            $emotionalState = $this->brain->getEmotionalState();
-            $learningStatus = $this->brain->getLearningStatus();
-            
-            // Öğrenilen kalıpları al
-            $learnedPatterns = AIData::select('word', 'frequency', 'category')
-                ->where('frequency', '>', 5)
-                ->orderBy('frequency', 'desc')
-                ->limit(20)
-                ->get()
-                ->map(function($pattern) {
-                    return [
-                        'word' => $pattern->word,
-                        'frequency' => $pattern->frequency,
-                        'category' => $pattern->category
-                    ];
-                });
-            
-            // Son aktiviteleri al
-            $recentActivities = $this->getRecentActivities();
-            
-            return response()->json([
-                'success' => true,
-                'status' => 'active',
-                'memory_usage' => $this->brain->getMemoryUsage(),
-                'learning_progress' => $this->brain->getLearningProgress(),
-                'emotional_state' => $emotionalState,
-                'memory_stats' => $memoryStatus,
-                'learned_patterns' => $learnedPatterns,
-                'recent_activities' => $recentActivities,
-                'timestamp' => time()
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Durum kontrolü sırasında bir hata oluştu: ' . $e->getMessage()
-            ], 500);
-        }
+        return $this->getAIStatus();
     }
-    
-    private function logActivity($description)
-    {
-        $activity = [
-            'description' => $description,
-            'timestamp' => Carbon::now()->format('Y-m-d H:i:s')
-        ];
-        
-        $activities = Cache::get('ai_activities', []);
-        array_unshift($activities, $activity);
-        
-        // Son 50 aktiviteyi tut
-        $activities = array_slice($activities, 0, 50);
-        
-        Cache::put('ai_activities', $activities, now()->addDay());
-    }
-    
-    private function getRecentActivities()
-    {
-        return Cache::get('ai_activities', []);
-    }
-
-    /**
-     * Kelimenin ilişkilerini getir
-     */
-    public function getWordRelations(Request $request)
-    {
-        try {
-            $word = $request->input('word');
-            
-            if(empty($word)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Kelime parametresi gereklidir'
-                ], 400);
-            }
-            
-            // Kelimenin ilişkilerini al
-            $relations = $this->brain->getWordRelations($word);
-            
-            return response()->json([
-                'success' => true,
-                'word' => $word,
-                'synonyms' => $relations['synonyms'],
-                'antonyms' => $relations['antonyms'],
-                'definition' => $relations['definition'],
-                'timestamp' => time()
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Kelime ilişkileri alınırken bir hata oluştu: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Kavramla ilgili cümle üret
-     */
-    public function generateSentence(Request $request)
-    {
-        try {
-            $concept = $request->input('concept');
-            
-            if(empty($concept)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Kavram parametresi gereklidir'
-                ], 400);
-            }
-            
-            // Kavramla ilgili cümle üret
-            $sentence = $this->brain->generateConceptualSentence($concept);
-            
-            $this->logActivity('Kavramla ilgili cümle üretildi: ' . $concept);
-            
-            return response()->json([
-                'success' => true,
-                'concept' => $concept,
-                'sentence' => $sentence,
-                'emotional_state' => $this->brain->getEmotionalState(),
-                'timestamp' => time()
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cümle üretilirken bir hata oluştu: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-} 
+}

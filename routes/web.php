@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\PageController;
 use App\Http\Controllers\Admin\AIChatController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ManageController;
+use App\Http\Controllers\SearchController;
 
 /*
 |--------------------------------------------------------------------------
@@ -86,27 +87,49 @@ Route::get('/', [ChatController::class, 'index'])->name('chat');
 Route::prefix('manage')->name('manage.')->group(function () {
     Route::get('/', [ManageController::class, 'index'])->name('index');
     
-    // Ayarları güncelleme
-    Route::post('/update-settings', [ManageController::class, 'updateSettings'])->name('update-settings');
+    // Ayarlar ve eğitim
+    Route::post('/update-settings', [ManageController::class, 'updateSettings']);
+    Route::post('/train', [ManageController::class, 'trainModel']);
+    Route::get('/train-status', [ManageController::class, 'getSystemStatus']);
     
-    // Eğitim modeli - açık bir şekilde tanımlanan route
-    Route::post('/train', [ManageController::class, 'trainModel'])->name('train');
-    Route::get('/train-status', [ManageController::class, 'getSystemStatus'])->name('train-status');
+    // Otomatik eğitim sistemi
+    Route::post('/automated-learning', [ManageController::class, 'startAutomatedLearning']);
     
-    // Sistem durumu
-    Route::get('/status', [ManageController::class, 'getSystemStatus'])->name('status');
+    // Yeni eğitim ve öğrenme sistemi
+    Route::post('/training/start', [ManageController::class, 'startTrainingProcess']);
+    Route::get('/training/status', [ManageController::class, 'getTrainingStatus']);
+    Route::post('/learning/start', [ManageController::class, 'startLearningProcess']);
+    Route::get('/learning/status', [ManageController::class, 'getLearningStatus']);
+    Route::get('/learning/progress', [ManageController::class, 'getLearningProgress']);
+    Route::get('/learning/stats', [ManageController::class, 'getLearningSystemStats']);
     
-    // AI veri istatistikleri
-    Route::get('/data-stats', [ManageController::class, 'getDataStats'])->name('data-stats');
+    // Kelime öğrenme
+    Route::post('/word/learn', [ManageController::class, 'learnWord']);
+    Route::get('/word/search', [ManageController::class, 'searchWord']);
+    
+    // Veritabanı bakımı
+    Route::post('/learning/clear', [ManageController::class, 'clearLearningSystem']);
 });
 
-// Yönetim paneli
-Route::get('/manage', [ManageController::class, 'index'])->name('manage');
-Route::post('/manage/update-settings', [ManageController::class, 'updateSettings'])->name('manage.update-settings');
-Route::post('/manage/train', [ManageController::class, 'trainModel'])->name('manage.train');
-Route::get('/manage/train-status', [ManageController::class, 'getSystemStatus'])->name('manage.train-status');
-Route::get('/manage/data-stats', [ManageController::class, 'getDataStats'])->name('manage.data-stats');
-Route::post('/manage/db-maintenance', [ManageController::class, 'runDatabaseMaintenance'])->name('manage.db-maintenance');
+// AI API rota tanımlamaları
+Route::prefix('api/ai')->group(function () {
+    Route::post('/chat', [AIController::class, 'chat']);
+    Route::get('/word/{word}', [AIController::class, 'getWordInfo']);
+    Route::get('/search', [AIController::class, 'searchWords']);
+    Route::get('/status', [AIController::class, 'getStatus']);
+    Route::get('/learning-status', [AIController::class, 'getLearningStatus']);
+    Route::get('/chat/{chat_id}', [AIController::class, 'getChatHistory']);
+    Route::get('/chats', [AIController::class, 'getUserChats']);
+});
 
-// ChatController için API route
+// APIController için API route
 Route::post('/api/ai/process', [ChatController::class, 'sendMessage']);
+
+// Arama API rotaları
+Route::prefix('api/search')->group(function () {
+    Route::get('/', [SearchController::class, 'search']);
+    Route::get('/ai', [SearchController::class, 'aiSearch']);
+});
+
+// Arama sonuç sayfası rotası (HTML görünümü için)
+Route::get('/search', [SearchController::class, 'search'])->name('search');

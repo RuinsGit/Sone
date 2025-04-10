@@ -16,12 +16,22 @@ class AIData extends Model
         'frequency',
         'language',
         'source',
+        'confidence',
+        'related_words',
+        'usage_examples',
+        'emotional_context',
+        'metadata',
         'created_at',
         'updated_at'
     ];
     
     protected $casts = [
         'frequency' => 'integer',
+        'confidence' => 'float',
+        'related_words' => 'array',
+        'usage_examples' => 'array',
+        'emotional_context' => 'array',
+        'metadata' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime'
     ];

@@ -1,287 +1,182 @@
 @extends('layouts.app')
 
-@section('title', 'SoneAI - Yönetim Paneli')
-
-@section('styles')
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-@endsection
-
 @section('content')
-<div class="container mx-auto px-4 py-8">
-    <div class="max-w-7xl mx-auto">
-        <!-- Header -->
-        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <div class="flex justify-between items-center">
-                <div>
-                    <h1 class="text-3xl font-bold text-gray-800">SoneAI Yönetim Paneli</h1>
-                    <p class="text-gray-600">Sistem ayarları ve durumu</p>
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4><i class="bi bi-gear-fill me-2"></i>SoneAI Yapay Zeka Yönetim Paneli</h4>
                 </div>
-                <div class="flex space-x-4">
-                    <a href="{{ route('chat') }}" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
-                        <i class="fas fa-comments mr-2"></i>Chat
-                    </a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Content -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- System Status -->
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-xl font-semibold mb-4">Sistem Durumu</h2>
-                <div class="space-y-4">
-                    <!-- Memory Status -->
-                    <div>
-                        <div class="flex justify-between mb-2">
-                            <span class="text-gray-600">Hafıza Kullanımı</span>
-                            <span class="text-gray-800 font-medium" id="memory-usage">0%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2.5">
-                            <div id="memory-usage-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
-                        </div>
-                    </div>
-
-                    <!-- Learning Progress -->
-                    <div>
-                        <div class="flex justify-between mb-2">
-                            <span class="text-gray-600">Öğrenme İlerlemesi</span>
-                            <span class="text-gray-800 font-medium" id="learning-progress">0%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 rounded-full h-2.5">
-                            <div id="learning-progress-bar" class="bg-green-600 h-2.5 rounded-full" style="width: 0%"></div>
-                        </div>
-                    </div>
-
-                    <!-- Emotional State -->
-                    <div>
-                        <h3 class="text-gray-600 mb-2">Duygusal Durum</h3>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div class="bg-blue-50 p-2 rounded">
-                                <span class="text-sm text-gray-600">Mutluluk</span>
-                                <div id="happiness-level" class="text-lg font-semibold text-blue-600">0%</div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="learning-tab" data-bs-toggle="tab" data-bs-target="#learning" type="button" role="tab" aria-controls="learning" aria-selected="true">
+                                <i class="bi bi-book me-1"></i> Öğrenme Sistemi
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats" type="button" role="tab" aria-controls="stats" aria-selected="false">
+                                <i class="bi bi-bar-chart me-1"></i> İstatistikler
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="word-tab" data-bs-toggle="tab" data-bs-target="#word" type="button" role="tab" aria-controls="word" aria-selected="false">
+                                <i class="bi bi-type me-1"></i> Kelime İşlemleri
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="maintenance-tab" data-bs-toggle="tab" data-bs-target="#maintenance" type="button" role="tab" aria-controls="maintenance" aria-selected="false">
+                                <i class="bi bi-tools me-1"></i> Bakım
+                            </button>
+                        </li>
+                    </ul>
+                    
+                    <div class="tab-content mt-3" id="myTabContent">
+                        <!-- Öğrenme Sistemi Tab -->
+                        <div class="tab-pane fade show active" id="learning" role="tabpanel" aria-labelledby="learning-tab">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-play-circle me-1"></i> Öğrenme İşlemi Başlat
+                                        </div>
+                                        <div class="card-body">
+                                            <form id="startLearningForm">
+                                                <div class="mb-3">
+                                                    <label for="wordLimit" class="form-label">Kelime Limiti</label>
+                                                    <input type="number" class="form-control" id="wordLimit" name="word_limit" min="1" max="1000" value="50">
+                                                    <div class="form-text">Öğrenilecek maksimum kelime sayısı</div>
+                                                </div>
+                                                
+                                                <div class="mb-3">
+                                                    <label for="manualWords" class="form-label">Manuel Kelimeler (isteğe bağlı)</label>
+                                                    <textarea class="form-control" id="manualWords" rows="3" placeholder="Her satıra bir kelime yazın"></textarea>
+                                                    <div class="form-text">Özel olarak öğrenmesini istediğiniz kelimeleri girin</div>
+                                                </div>
+                                                
+                                                <button type="button" id="startLearningBtn" class="btn btn-primary">
+                                                    <i class="bi bi-play-fill me-1"></i> Öğrenmeyi Başlat
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-info-circle me-1"></i> Öğrenme Durumu
+                                        </div>
+                                        <div class="card-body">
+                                            <div id="learningStatus">
+                                                <div class="d-flex justify-content-center">
+                                                    <div class="spinner-border text-primary" role="status">
+                                                        <span class="visually-hidden">Yükleniyor...</span>
+                                                    </div>
+                                                </div>
+                                                <p class="text-center mt-2">Durum bilgisi yükleniyor...</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="bg-green-50 p-2 rounded">
-                                <span class="text-sm text-gray-600">Merak</span>
-                                <div id="curiosity-level" class="text-lg font-semibold text-green-600">0%</div>
+                        </div>
+                        
+                        <!-- İstatistikler Tab -->
+                        <div class="tab-pane fade" id="stats" role="tabpanel" aria-labelledby="stats-tab">
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-graph-up me-1"></i> Sistem İstatistikleri
+                                        </div>
+                                        <div class="card-body">
+                                            <div id="statsContent">
+                                                <div class="d-flex justify-content-center">
+                                                    <div class="spinner-border text-primary" role="status">
+                                                        <span class="visually-hidden">Yükleniyor...</span>
+                                                    </div>
+                                                </div>
+                                                <p class="text-center mt-2">İstatistikler yükleniyor...</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Kelime İşlemleri Tab -->
+                        <div class="tab-pane fade" id="word" role="tabpanel" aria-labelledby="word-tab">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-plus-circle me-1"></i> Kelime Öğrenme
+                                        </div>
+                                        <div class="card-body">
+                                            <form id="learnWordForm">
+                                                <div class="mb-3">
+                                                    <label for="word" class="form-label">Kelime</label>
+                                                    <input type="text" class="form-control" id="word" name="word" minlength="2" maxlength="100" required>
+                                                </div>
+                                                
+                                                <button type="button" id="learnWordBtn" class="btn btn-primary">
+                                                    <i class="bi bi-check-circle me-1"></i> Kelimeyi Öğren
+                                                </button>
+                                            </form>
+                                            
+                                            <div id="wordResult" class="mt-3"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-search me-1"></i> Kelime Arama
+                                        </div>
+                                        <div class="card-body">
+                                            <form id="searchWordForm">
+                                                <div class="mb-3">
+                                                    <label for="searchQuery" class="form-label">Arama</label>
+                                                    <input type="text" class="form-control" id="searchQuery" name="query" minlength="2" maxlength="100" required>
+                                                </div>
+                                                
+                                                <button type="button" id="searchWordBtn" class="btn btn-primary">
+                                                    <i class="bi bi-search me-1"></i> Ara
+                                                </button>
+                                            </form>
+                                            
+                                            <div id="searchResult" class="mt-3"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Bakım Tab -->
+                        <div class="tab-pane fade" id="maintenance" role="tabpanel" aria-labelledby="maintenance-tab">
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-wrench me-1"></i> Bakım İşlemleri
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="alert alert-warning">
+                                                <i class="bi bi-exclamation-triangle-fill me-1"></i> <strong>Dikkat!</strong> Bu işlemler geri alınamaz!
+                                            </div>
+                                            
+                                            <button type="button" id="clearLearningBtn" class="btn btn-danger">
+                                                <i class="bi bi-trash me-1"></i> Öğrenme Sistemini Temizle
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <!-- Settings -->
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-xl font-semibold mb-4">Ayarlar</h2>
-                <form id="settings-form" class="space-y-4">
-                    @csrf
-                    <!-- Learning Rate -->
-                    <div>
-                        <label class="block text-gray-700 text-sm font-bold mb-2">
-                            Öğrenme Hızı
-                        </label>
-                        <input type="range" 
-                               name="learning_rate" 
-                               min="0" 
-                               max="1" 
-                               step="0.1" 
-                               value="0.5"
-                               class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                        <div class="text-right text-sm text-gray-600" id="learning-rate-value">0.5</div>
-                    </div>
-
-                    <!-- Memory Capacity -->
-                    <div>
-                        <label class="block text-gray-700 text-sm font-bold mb-2">
-                            Hafıza Kapasitesi
-                        </label>
-                        <input type="number" 
-                               name="memory_capacity" 
-                               min="1000" 
-                               max="1000000" 
-                               value="100000"
-                               class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
-                    </div>
-
-                    <!-- Emotional Sensitivity -->
-                    <div>
-                        <label class="block text-gray-700 text-sm font-bold mb-2">
-                            Duygusal Hassasiyet
-                        </label>
-                        <input type="range" 
-                               name="emotional_sensitivity" 
-                               min="0" 
-                               max="1" 
-                               step="0.1" 
-                               value="0.7"
-                               class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                        <div class="text-right text-sm text-gray-600" id="emotional-sensitivity-value">0.7</div>
-                    </div>
-
-                    <!-- Personality Traits -->
-                    <div>
-                        <label class="block text-gray-700 text-sm font-bold mb-2">
-                            Kişilik Özellikleri
-                        </label>
-                        <div class="space-y-2">
-                            <label class="flex items-center">
-                                <input type="checkbox" name="personality_traits[]" value="curious" class="mr-2">
-                                <span>Meraklı</span>
-                            </label>
-                            <label class="flex items-center">
-                                <input type="checkbox" name="personality_traits[]" value="creative" class="mr-2">
-                                <span>Yaratıcı</span>
-                            </label>
-                            <label class="flex items-center">
-                                <input type="checkbox" name="personality_traits[]" value="analytical" class="mr-2">
-                                <span>Analitik</span>
-                            </label>
-                            <label class="flex items-center">
-                                <input type="checkbox" name="personality_traits[]" value="empathetic" class="mr-2">
-                                <span>Empatik</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <button type="submit" 
-                            class="w-full bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
-                        Ayarları Kaydet
-                    </button>
-                </form>
-            </div>
-        </div>
-
-        <!-- Training Section -->
-        <div class="bg-white rounded-lg shadow-md p-6 mt-6">
-            <h2 class="text-xl font-semibold mb-4">Model Eğitimi ve Bakım</h2>
-            <div class="flex flex-col space-y-4">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-600">Model eğitimini başlatın veya durdurun</p>
-                        <p class="text-sm text-gray-500">Eğitim işlemi birkaç dakika sürebilir ve sistem kaynaklarını kullanır.</p>
-                    </div>
-                    <button id="start-training" 
-                            class="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                        <i class="fas fa-play mr-2"></i>Eğitimi Başlat
-                    </button>
-                </div>
-                
-                <!-- Database Maintenance -->
-                <div class="border-t pt-4 mt-4">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-gray-600">Veritabanı Bakımı</p>
-                            <p class="text-sm text-gray-500">Veritabanını temizleyin ve optimize edin. Bu işlem performansı artırır ve veri limiti sorunlarını çözer.</p>
-                        </div>
-                        <div class="flex space-x-2">
-                            <button id="db-clean" 
-                                    class="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                                <i class="fas fa-broom mr-1"></i>Temizle
-                            </button>
-                            <button id="db-optimize" 
-                                    class="bg-purple-500 text-white px-3 py-2 rounded-lg hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                                <i class="fas fa-bolt mr-1"></i>Optimize Et
-                            </button>
-                            <button id="db-reset" 
-                                    class="bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                                <i class="fas fa-trash mr-1"></i>Sıfırla
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Maintenance Status -->
-                <div id="maintenance-status" class="hidden bg-blue-50 p-4 rounded-lg border border-blue-200 mt-2">
-                    <div class="flex items-center">
-                        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mr-3"></div>
-                        <div class="flex-1">
-                            <p class="font-medium text-blue-700">Bakım İşlemi Devam Ediyor</p>
-                            <p class="text-sm text-blue-600">Bu işlem birkaç dakika sürebilir.</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Maintenance Success -->
-                <div id="maintenance-success" class="hidden bg-green-50 p-4 rounded-lg border border-green-200 mt-2">
-                    <div class="flex items-center">
-                        <i class="fas fa-check-circle text-green-500 text-xl mr-3"></i>
-                        <div>
-                            <p class="font-medium text-green-700">Bakım Tamamlandı!</p>
-                            <div id="maintenance-success-details" class="text-sm text-green-600"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Maintenance Error -->
-                <div id="maintenance-error" class="hidden bg-red-50 p-4 rounded-lg border border-red-200 mt-2">
-                    <div class="flex items-center">
-                        <i class="fas fa-exclamation-circle text-red-500 text-xl mr-3"></i>
-                        <div>
-                            <p class="font-medium text-red-700">Bakım Başarısız!</p>
-                            <p class="text-sm text-red-600 mb-2" id="maintenance-error-message">Bir hata oluştu.</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Training indicators (keep existing code) -->
-                <!-- Eğitim Durumu Göstergesi -->
-                <div id="training-status" class="hidden bg-blue-50 p-4 rounded-lg border border-blue-200">
-                    <div class="flex items-center">
-                        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-700 mr-3"></div>
-                        <div class="flex-1">
-                            <p class="font-medium text-blue-700">Eğitim İşlemi Devam Ediyor</p>
-                            <p class="text-sm text-blue-600">Bu işlem birkaç dakika sürebilir. Lütfen sayfadan ayrılmayın.</p>
-                        </div>
-                    </div>
-                    <div class="mt-3">
-                        <div class="w-full bg-blue-200 rounded-full h-2.5 mb-1">
-                            <div id="training-progress-bar" class="bg-blue-700 h-2.5 rounded-full" style="width: 0%"></div>
-                        </div>
-                        <div class="text-right text-sm text-blue-600" id="training-progress-text">0%</div>
-                    </div>
-                </div>
-                
-                <!-- Eğitim Başarılı Göstergesi -->
-                <div id="training-success" class="hidden bg-green-50 p-4 rounded-lg border border-green-200">
-                    <div class="flex items-center">
-                        <i class="fas fa-check-circle text-green-500 text-xl mr-3"></i>
-                        <div>
-                            <p class="font-medium text-green-700">Eğitim Tamamlandı!</p>
-                            <p class="text-sm text-green-600">Model başarıyla eğitildi ve kullanıma hazır.</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Eğitim Hata Göstergesi -->
-                <div id="training-error" class="hidden bg-red-50 p-4 rounded-lg border border-red-200">
-                    <div class="flex items-center">
-                        <i class="fas fa-exclamation-circle text-red-500 text-xl mr-3"></i>
-                        <div>
-                            <p class="font-medium text-red-700">Eğitim Başarısız!</p>
-                            <p class="text-sm text-red-600 mb-2" id="training-error-message">Bir hata oluştu.</p>
-                            <button id="show-error-details" class="text-xs text-red-700 underline">Hata Detayları</button>
-                        </div>
-                    </div>
-                    <pre id="training-error-details" class="hidden mt-2 text-xs bg-red-100 p-2 rounded overflow-auto max-h-32"></pre>
-                </div>
-            </div>
-        </div>
-
-        <!-- Learning Activity -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-            <!-- Learned Patterns -->
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-xl font-semibold mb-4">Öğrenilen Kalıplar</h2>
-                <div id="learned-patterns" class="space-y-2 max-h-80 overflow-y-auto">
-                    <!-- Dinamik olarak doldurulacak -->
-                </div>
-            </div>
-
-            <!-- Recent Activities -->
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-xl font-semibold mb-4">Son Aktiviteler</h2>
-                <div id="recent-activities" class="space-y-2 max-h-80 overflow-y-auto">
-                    <!-- Dinamik olarak doldurulacak -->
                 </div>
             </div>
         </div>
@@ -291,339 +186,466 @@
 
 @section('scripts')
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Range input değerlerini güncelle
-        const learningRateInput = document.querySelector('input[name="learning_rate"]');
-        const learningRateValue = document.getElementById('learning-rate-value');
-        learningRateInput.addEventListener('input', function() {
-            learningRateValue.textContent = this.value;
-        });
+$(document).ready(function() {
+    // Sayfa yüklendiğinde aktif sekmeyi kontrol et
+    if (window.location.hash) {
+        let hash = window.location.hash;
+        $('.nav-tabs a[href="' + hash + '"]').tab('show');
+    }
 
-        const emotionalSensitivityInput = document.querySelector('input[name="emotional_sensitivity"]');
-        const emotionalSensitivityValue = document.getElementById('emotional-sensitivity-value');
-        emotionalSensitivityInput.addEventListener('input', function() {
-            emotionalSensitivityValue.textContent = this.value;
-        });
+    // Tab değişiminde URL hash'ini güncelle
+    $('.nav-tabs a').on('shown.bs.tab', function (e) {
+        window.location.hash = e.target.getAttribute('data-bs-target');
+    });
 
-        // Ayarları kaydet
-        const settingsForm = document.getElementById('settings-form');
-        settingsForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            fetch('/manage/update-settings', {
-                method: 'POST',
-                headers: {
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if(data.success) {
-                    alert('Ayarlar başarıyla güncellendi');
-                    updateSystemStatus(data.status);
+    // Öğrenme durumunu 5 saniyede bir kontrol et
+    function checkLearningStatus() {
+        $.ajax({
+            url: '/manage/learning/status',
+            type: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                let status = response.data;
+                let html = '';
+
+                if (status.is_learning) {
+                    html += '<div class="alert alert-info"><i class="bi bi-info-circle-fill me-2"></i>Öğrenme işlemi aktif</div>';
+                    html += '<div class="progress mb-3">';
+                    let percent = Math.round((status.learned_count / status.word_limit) * 100);
+                    html += '<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ' + percent + '%" aria-valuenow="' + percent + '" aria-valuemin="0" aria-valuemax="100">' + percent + '%</div>';
+                    html += '</div>';
                 } else {
-                    alert('Ayarlar güncellenirken bir hata oluştu');
+                    html += '<div class="alert alert-secondary"><i class="bi bi-pause-circle-fill me-2"></i>Öğrenme işlemi beklemede</div>';
                 }
-            });
-        });
 
-        // Veritabanı bakım işlemleri
-        const maintenanceStatus = document.getElementById('maintenance-status');
-        const maintenanceSuccess = document.getElementById('maintenance-success');
-        const maintenanceError = document.getElementById('maintenance-error');
-        const maintenanceErrorMessage = document.getElementById('maintenance-error-message');
-        const maintenanceSuccessDetails = document.getElementById('maintenance-success-details');
-        
-        // Veritabanı temizleme
-        document.getElementById('db-clean').addEventListener('click', function() {
-            runDatabaseMaintenance('clean', this);
-        });
-        
-        // Veritabanı optimizasyonu
-        document.getElementById('db-optimize').addEventListener('click', function() {
-            runDatabaseMaintenance('optimize', this);
-        });
-        
-        // Veritabanı sıfırlama
-        document.getElementById('db-reset').addEventListener('click', function() {
-            if (confirm('DİKKAT: Bu işlem tüm veritabanını sıfırlayacak ve öğrenilen tüm veriler kaybolacaktır! Devam etmek istiyor musunuz?')) {
-                runDatabaseMaintenance('reset', this);
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-bordered">';
+                html += '<tr><th>Toplam Kelime Limiti</th><td>' + status.word_limit + '</td></tr>';
+                html += '<tr><th>Öğrenilen Kelimeler</th><td>' + status.learned_count + '</td></tr>';
+                html += '<tr><th>Son Öğrenilen Kelime</th><td>' + (status.last_word ? status.last_word : '-') + '</td></tr>';
+                html += '<tr><th>Başlangıç Zamanı</th><td>' + (status.start_time ? status.start_time : '-') + '</td></tr>';
+                html += '<tr><th>Tahmini Bitiş</th><td>' + (status.estimated_end ? status.estimated_end : '-') + '</td></tr>';
+                html += '<tr><th>İşlem Süresi</th><td>' + (status.elapsed_time ? status.elapsed_time : '-') + '</td></tr>';
+                html += '</table>';
+                html += '</div>';
+
+                if (status.is_learning) {
+                    html += '<button type="button" id="stopLearningBtn" class="btn btn-danger"><i class="bi bi-stop-fill me-1"></i>Öğrenmeyi Durdur</button>';
+                }
+
+                $('#learningStatus').html(html);
+
+                // Öğrenmeyi durdurma işlemini bağla
+                $('#stopLearningBtn').on('click', function() {
+                    stopLearning();
+                });
+            },
+            error: function(xhr, status, error) {
+                $('#learningStatus').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>Durum bilgisi alınamadı: ' + error + '</div>');
             }
         });
-        
-        // Veritabanı bakım işlemini çalıştır
-        function runDatabaseMaintenance(mode, button) {
-            // Butonu devre dışı bırak ve yükleniyor göster
-            const allButtons = document.querySelectorAll('#db-clean, #db-optimize, #db-reset');
-            allButtons.forEach(btn => btn.disabled = true);
-            
-            // İşlem türüne göre yükleniyor mesajını ayarla
-            const loadingMessages = {
-                'clean': 'Temizleniyor...',
-                'optimize': 'Optimize Ediliyor...',
-                'reset': 'Sıfırlanıyor...'
-            };
-            
-            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>' + loadingMessages[mode];
-            
-            // Durum göstergelerini ayarla
-            maintenanceStatus.classList.remove('hidden');
-            maintenanceSuccess.classList.add('hidden');
-            maintenanceError.classList.add('hidden');
-            
-            // CSRF token'ı al
-            const token = document.querySelector('meta[name="csrf-token"]').content;
-            
-            // AJAX çağrısı yap
-            fetch('/manage/db-maintenance', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': token,
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({ mode: mode })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Sunucu hatası: ' + response.status);
-                }
-                return response.json();
-            })
-            .then(data => {
-                // Durum göstergelerini güncelle
-                maintenanceStatus.classList.add('hidden');
-                
-                if (data.success) {
-                    // Başarılı ise
-                    maintenanceSuccess.classList.remove('hidden');
-                    maintenanceSuccessDetails.innerHTML = data.output ? data.output.replace(/\n/g, '<br>') : 'İşlem başarıyla tamamlandı.';
-                    
-                    // Sistem durumunu güncelle
-                    updateSystemStatus();
+    }
+
+    // Öğrenmeyi durdur
+    function stopLearning() {
+        $.ajax({
+            url: '/manage/learning/stop',
+            type: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    $('#learningStatus').html('<div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>' + response.message + '</div>');
+                    setTimeout(checkLearningStatus, 1000);
                 } else {
-                    // Başarısız ise
-                    maintenanceError.classList.remove('hidden');
-                    maintenanceErrorMessage.textContent = data.message || 'Bilinmeyen hata';
+                    $('#learningStatus').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>' + response.message + '</div>');
                 }
-                
-                // Butonu normal haline getir
-                const buttonText = {
-                    'clean': '<i class="fas fa-broom mr-1"></i>Temizle',
-                    'optimize': '<i class="fas fa-bolt mr-1"></i>Optimize Et',
-                    'reset': '<i class="fas fa-trash mr-1"></i>Sıfırla'
-                };
-                
-                button.innerHTML = buttonText[mode];
-                allButtons.forEach(btn => btn.disabled = false);
-            })
-            .catch(error => {
-                // Hata durumunda
-                maintenanceStatus.classList.add('hidden');
-                maintenanceError.classList.remove('hidden');
-                maintenanceErrorMessage.textContent = error.message || 'Bilinmeyen hata';
-                
-                // Butonu normal haline getir
-                const buttonText = {
-                    'clean': '<i class="fas fa-broom mr-1"></i>Temizle',
-                    'optimize': '<i class="fas fa-bolt mr-1"></i>Optimize Et',
-                    'reset': '<i class="fas fa-trash mr-1"></i>Sıfırla'
-                };
-                
-                button.innerHTML = buttonText[mode];
-                allButtons.forEach(btn => btn.disabled = false);
-            });
-        }
-
-        // Sistem durumunu güncelle
-        function updateSystemStatus() {
-            fetch('/api/ai/status')
-                .then(response => response.json())
-                .then(data => {
-                    // Hafıza ve öğrenme durumunu güncelle
-                    const memoryUsage = document.getElementById('memory-usage');
-                    const memoryUsageBar = document.getElementById('memory-usage-bar');
-                    const learningProgress = document.getElementById('learning-progress');
-                    const learningProgressBar = document.getElementById('learning-progress-bar');
-                    const happinessLevel = document.getElementById('happiness-level');
-                    const curiosityLevel = document.getElementById('curiosity-level');
-
-                    memoryUsage.textContent = data.memory_usage + '%';
-                    memoryUsageBar.style.width = data.memory_usage + '%';
-                    learningProgress.textContent = data.learning_progress + '%';
-                    learningProgressBar.style.width = data.learning_progress + '%';
-                    
-                    if(data.emotional_state) {
-                        happinessLevel.textContent = Math.round(data.emotional_state.happiness * 100) + '%';
-                        curiosityLevel.textContent = Math.round(data.emotional_state.curiosity * 100) + '%';
-                    }
-
-                    // Öğrenilen kalıpları güncelle
-                    if(data.learned_patterns) {
-                        const learnedPatternsContainer = document.getElementById('learned-patterns');
-                        learnedPatternsContainer.innerHTML = '';
-                        
-                        data.learned_patterns.forEach(pattern => {
-                            const div = document.createElement('div');
-                            div.className = 'p-2 bg-gray-50 rounded flex justify-between items-center';
-                            div.innerHTML = `
-                                <span class="text-gray-700">${pattern.word}</span>
-                                <span class="text-sm text-gray-500">Frekans: ${pattern.frequency}</span>
-                            `;
-                            learnedPatternsContainer.appendChild(div);
-                        });
-                    }
-
-                    // Son aktiviteleri güncelle
-                    if(data.recent_activities) {
-                        const recentActivitiesContainer = document.getElementById('recent-activities');
-                        recentActivitiesContainer.innerHTML = '';
-                        
-                        data.recent_activities.forEach(activity => {
-                            const div = document.createElement('div');
-                            div.className = 'p-2 bg-gray-50 rounded';
-                            div.innerHTML = `
-                                <div class="text-sm text-gray-700">${activity.description}</div>
-                                <div class="text-xs text-gray-500">${activity.timestamp}</div>
-                            `;
-                            recentActivitiesContainer.appendChild(div);
-                        });
-                    }
-                });
-        }
-
-        // Her 30 saniyede bir durumu güncelle
-        setInterval(updateSystemStatus, 30000);
-        updateSystemStatus();
-
-        // Eğitim durumu göstergeleri
-        const trainingStatus = document.getElementById('training-status');
-        const trainingSuccess = document.getElementById('training-success');
-        const trainingError = document.getElementById('training-error');
-        const trainingErrorMessage = document.getElementById('training-error-message');
-        const trainingErrorDetails = document.getElementById('training-error-details');
-        const showErrorDetailsBtn = document.getElementById('show-error-details');
-        const trainingProgressBar = document.getElementById('training-progress-bar');
-        const trainingProgressText = document.getElementById('training-progress-text');
-        
-        // Hata detaylarını göster/gizle
-        showErrorDetailsBtn && showErrorDetailsBtn.addEventListener('click', function() {
-            trainingErrorDetails.classList.toggle('hidden');
+            },
+            error: function(xhr, status, error) {
+                $('#learningStatus').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>Öğrenme durdurulamadı: ' + error + '</div>');
+            }
         });
-        
-        // Eğitim durumunu kontrol et
-        function checkTrainingStatus() {
-            fetch('/manage/train-status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.is_training) {
-                        // Eğitim devam ediyor
-                        trainingStatus.classList.remove('hidden');
-                        trainingSuccess.classList.add('hidden');
-                        trainingError.classList.add('hidden');
-                        
-                        // İlerleme durumunu güncelle
-                        const progress = data.learning_progress || 0;
-                        trainingProgressBar.style.width = progress + '%';
-                        trainingProgressText.textContent = progress + '%';
-                        
-                        // 3 saniye sonra tekrar kontrol et
-                        setTimeout(checkTrainingStatus, 3000);
-                    } else {
-                        // Eğitim bitti veya hiç başlamadı
-                        trainingStatus.classList.add('hidden');
-                    }
-                })
-                .catch(error => {
-                    console.error('Eğitim durumu kontrolü hatası:', error);
-                });
+    }
+
+    // İlk kontrol
+    checkLearningStatus();
+    
+    // 5 saniyede bir yenile
+    setInterval(checkLearningStatus, 5000);
+
+    // Öğrenme işlemini başlat
+    $('#startLearningBtn').click(function() {
+        let wordLimit = $('#wordLimit').val();
+        let manualWords = $('#manualWords').val();
+
+        if (wordLimit < 1) {
+            alert('Kelime limiti en az 1 olmalıdır.');
+            return;
         }
 
-        // Eğitim başlatma
-        document.getElementById('start-training').addEventListener('click', function() {
-            // Butonu devre dışı bırak ve yükleniyor göster
-            const button = this;
-            button.disabled = true;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Eğitim Başlatılıyor...';
-            
-            // Durum göstergelerini sıfırla
-            trainingStatus.classList.remove('hidden');
-            trainingSuccess.classList.add('hidden');
-            trainingError.classList.add('hidden');
-            trainingProgressBar.style.width = '0%';
-            trainingProgressText.textContent = '0%';
+        let data = {
+            word_limit: wordLimit
+        };
 
-            // CSRF token'ı al
-            const token = document.querySelector('meta[name="csrf-token"]').content;
-            
-            // AJAX çağrısı yap
-            fetch('/manage/train', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': token,
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    learning_rate: document.querySelector('input[name="learning_rate"]').value || 0.1
-                })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Sunucu hatası: ' + response.status);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if(data.success) {
-                    // Başarılı ise durumu göster
-                    console.log('Eğitim başlatıldı:', data);
-                    
-                    // Eğitim durumunu düzenli olarak kontrol et
-                    checkTrainingStatus();
-                    
-                    // Sistem durumunu güncelle
-                    updateSystemStatus();
-                    
-                    // Butonu aktif hale getir ve metnini güncelle
-                    button.disabled = false;
-                    button.innerHTML = '<i class="fas fa-play mr-2"></i>Eğitimi Başlat';
+        if (manualWords.trim() !== '') {
+            // Satır satır kelimeleri diziye dönüştür
+            data.manual_words = manualWords.trim().split('\n').filter(w => w.trim() !== '');
+        }
+
+        $('#startLearningBtn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> İşlem başlatılıyor...');
+
+        $.ajax({
+            url: '/manage/learning/start',
+            type: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            },
+            data: data,
+            dataType: 'json',
+            success: function(response) {
+                $('#startLearningBtn').prop('disabled', false).html('<i class="bi bi-play-fill me-1"></i> Öğrenmeyi Başlat');
+                
+                if (response.success) {
+                    alert('Öğrenme işlemi başlatıldı.');
+                    checkLearningStatus();
                 } else {
-                    // Başarısız ise hata göster
-                    console.error('Eğitim hatası:', data.message);
-                    
-                    // Hata durumunu göster
-                    trainingStatus.classList.add('hidden');
-                    trainingSuccess.classList.add('hidden');
-                    trainingError.classList.remove('hidden');
-                    trainingErrorMessage.textContent = data.message || 'Bilinmeyen hata';
-                    
-                    if (data.trace) {
-                        trainingErrorDetails.textContent = data.trace;
-                    }
-                    
-                    // Butonu aktif hale getir ve metnini güncelle
-                    button.disabled = false;
-                    button.innerHTML = '<i class="fas fa-play mr-2"></i>Eğitimi Başlat';
+                    alert('Hata: ' + response.message);
                 }
-            })
-            .catch(error => {
-                // Hata durumunda uyarı göster
-                console.error('Eğitim hatası:', error);
-                
-                // Hata durumunu göster
-                trainingStatus.classList.add('hidden');
-                trainingSuccess.classList.add('hidden');
-                trainingError.classList.remove('hidden');
-                trainingErrorMessage.textContent = error.message || 'Bilinmeyen hata';
-                
-                // Butonu aktif hale getir ve metnini güncelle
-                button.disabled = false;
-                button.innerHTML = '<i class="fas fa-play mr-2"></i>Eğitimi Başlat';
-            });
+            },
+            error: function(xhr, status, error) {
+                $('#startLearningBtn').prop('disabled', false).html('<i class="bi bi-play-fill me-1"></i> Öğrenmeyi Başlat');
+                alert('Bir hata oluştu: ' + error);
+            }
         });
     });
+
+    // İstatistikleri getir
+    function loadStats() {
+        $.ajax({
+            url: '/manage/learning/stats',
+            type: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    let stats = response.data;
+                    let html = '';
+
+                    // Ana istatistikler
+                    html += '<div class="row mb-4">';
+                    html += '<div class="col-md-3">';
+                    html += '<div class="card bg-primary text-white h-100">';
+                    html += '<div class="card-body text-center">';
+                    html += '<h5 class="card-title"><i class="bi bi-book-half me-1"></i>Toplam Kelime</h5>';
+                    html += '<h3 class="mb-0">' + stats.total_words + '</h3>';
+                    html += '</div></div></div>';
+
+                    html += '<div class="col-md-3">';
+                    html += '<div class="card bg-success text-white h-100">';
+                    html += '<div class="card-body text-center">';
+                    html += '<h5 class="card-title"><i class="bi bi-collection me-1"></i>Toplam Kategori</h5>';
+                    html += '<h3 class="mb-0">' + stats.total_categories + '</h3>';
+                    html += '</div></div></div>';
+
+                    html += '<div class="col-md-3">';
+                    html += '<div class="card bg-info text-white h-100">';
+                    html += '<div class="card-body text-center">';
+                    html += '<h5 class="card-title"><i class="bi bi-arrow-left-right me-1"></i>Kelime İlişkileri</h5>';
+                    html += '<h3 class="mb-0">' + stats.total_relations + '</h3>';
+                    html += '</div></div></div>';
+
+                    html += '<div class="col-md-3">';
+                    html += '<div class="card bg-warning text-dark h-100">';
+                    html += '<div class="card-body text-center">';
+                    html += '<h5 class="card-title"><i class="bi bi-database me-1"></i>AI Veri Boyutu</h5>';
+                    html += '<h3 class="mb-0">' + stats.db_size + '</h3>';
+                    html += '</div></div></div>';
+                    html += '</div>';
+
+                    // Kelime türleri tablosu
+                    if (stats.word_types && stats.word_types.length > 0) {
+                        html += '<div class="card mb-4">';
+                        html += '<div class="card-header">Kelime Türleri Dağılımı</div>';
+                        html += '<div class="card-body">';
+                        html += '<div class="table-responsive">';
+                        html += '<table class="table table-striped table-hover">';
+                        html += '<thead><tr><th>Tür</th><th>Sayı</th><th>Yüzde</th></tr></thead>';
+                        html += '<tbody>';
+                        
+                        stats.word_types.forEach(function(item) {
+                            html += '<tr>';
+                            html += '<td>' + item.type + '</td>';
+                            html += '<td>' + item.count + '</td>';
+                            html += '<td>' + item.percent + '%</td>';
+                            html += '</tr>';
+                        });
+                        
+                        html += '</tbody>';
+                        html += '</table>';
+                        html += '</div></div></div>';
+                    }
+
+                    // En çok ilişkili kelimeler
+                    if (stats.top_related_words && stats.top_related_words.length > 0) {
+                        html += '<div class="card mb-4">';
+                        html += '<div class="card-header">En Çok İlişkili Kelimeler</div>';
+                        html += '<div class="card-body">';
+                        html += '<div class="table-responsive">';
+                        html += '<table class="table table-striped table-hover">';
+                        html += '<thead><tr><th>Kelime</th><th>İlişki Sayısı</th><th>En Güçlü İlişki</th></tr></thead>';
+                        html += '<tbody>';
+                        
+                        stats.top_related_words.forEach(function(item) {
+                            html += '<tr>';
+                            html += '<td>' + item.word + '</td>';
+                            html += '<td>' + item.relation_count + '</td>';
+                            html += '<td>' + (item.strongest_relation ? item.strongest_relation : '-') + '</td>';
+                            html += '</tr>';
+                        });
+                        
+                        html += '</tbody>';
+                        html += '</table>';
+                        html += '</div></div></div>';
+                    }
+
+                    // En popüler kategoriler
+                    if (stats.top_categories && stats.top_categories.length > 0) {
+                        html += '<div class="card">';
+                        html += '<div class="card-header">En Popüler Kategoriler</div>';
+                        html += '<div class="card-body">';
+                        html += '<div class="table-responsive">';
+                        html += '<table class="table table-striped table-hover">';
+                        html += '<thead><tr><th>Kategori</th><th>Kelime Sayısı</th><th>Yüzde</th></tr></thead>';
+                        html += '<tbody>';
+                        
+                        stats.top_categories.forEach(function(item) {
+                            html += '<tr>';
+                            html += '<td>' + item.category + '</td>';
+                            html += '<td>' + item.count + '</td>';
+                            html += '<td>' + item.percent + '%</td>';
+                            html += '</tr>';
+                        });
+                        
+                        html += '</tbody>';
+                        html += '</table>';
+                        html += '</div></div></div>';
+                    }
+
+                    $('#statsContent').html(html);
+                } else {
+                    $('#statsContent').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>' + response.message + '</div>');
+                }
+            },
+            error: function(xhr, status, error) {
+                $('#statsContent').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>İstatistikler yüklenemedi: ' + error + '</div>');
+            }
+        });
+    }
+
+    // Stats tab gösterildiğinde istatistikleri yükle
+    $('#stats-tab').on('shown.bs.tab', function (e) {
+        loadStats();
+    });
+
+    // Kelime öğrenme
+    $('#learnWordBtn').click(function() {
+        let word = $('#word').val().trim();
+        
+        if (word.length < 2) {
+            alert('Kelime en az 2 karakter olmalıdır.');
+            return;
+        }
+        
+        $('#learnWordBtn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> İşleniyor...');
+        $('#wordResult').html('');
+        
+        $.ajax({
+            url: '/manage/word/learn',
+            type: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            },
+            data: {
+                word: word
+            },
+            dataType: 'json',
+            success: function(response) {
+                $('#learnWordBtn').prop('disabled', false).html('<i class="bi bi-check-circle me-1"></i> Kelimeyi Öğren');
+                
+                if (response.success) {
+                    let html = '<div class="alert alert-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>' + response.message + '</div>';
+                    
+                    if (response.data) {
+                        let data = response.data;
+                        
+                        html += '<div class="card">';
+                        html += '<div class="card-header">Öğrenilen Kelime Bilgileri</div>';
+                        html += '<div class="card-body">';
+                        html += '<div class="table-responsive">';
+                        html += '<table class="table table-bordered">';
+                        
+                        if (data.word) {
+                            html += '<tr><th style="width: 150px;">Kelime</th><td>' + data.word + '</td></tr>';
+                        }
+                        
+                        if (data.type) {
+                            html += '<tr><th>Tür</th><td>' + data.type + '</td></tr>';
+                        }
+                        
+                        if (data.definition) {
+                            html += '<tr><th>Tanım</th><td>' + data.definition + '</td></tr>';
+                        }
+                        
+                        if (data.category) {
+                            html += '<tr><th>Kategori</th><td>' + data.category + '</td></tr>';
+                        }
+                        
+                        if (data.example) {
+                            html += '<tr><th>Örnek</th><td>' + data.example + '</td></tr>';
+                        }
+                        
+                        if (data.relation_count) {
+                            html += '<tr><th>İlişki Sayısı</th><td>' + data.relation_count + '</td></tr>';
+                        }
+                        
+                        html += '</table>';
+                        html += '</div>';
+                        html += '</div>';
+                        html += '</div>';
+                    }
+                    
+                    $('#wordResult').html(html);
+                } else {
+                    $('#wordResult').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>' + response.message + '</div>');
+                }
+            },
+            error: function(xhr, status, error) {
+                $('#learnWordBtn').prop('disabled', false).html('<i class="bi bi-check-circle me-1"></i> Kelimeyi Öğren');
+                $('#wordResult').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>Bir hata oluştu: ' + error + '</div>');
+            }
+        });
+    });
+
+    // Kelime arama
+    $('#searchWordBtn').click(function() {
+        let query = $('#searchQuery').val().trim();
+        
+        if (query.length < 2) {
+            alert('Arama metni en az 2 karakter olmalıdır.');
+            return;
+        }
+        
+        $('#searchWordBtn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Aranıyor...');
+        $('#searchResult').html('');
+        
+        $.ajax({
+            url: '/manage/word/search',
+            type: 'GET',
+            data: {
+                query: query
+            },
+            dataType: 'json',
+            success: function(response) {
+                $('#searchWordBtn').prop('disabled', false).html('<i class="bi bi-search me-1"></i> Ara');
+                
+                if (response.success) {
+                    if (response.data && response.data.length > 0) {
+                        let html = '<div class="alert alert-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>' + response.data.length + ' sonuç bulundu</div>';
+                        
+                        html += '<div class="accordion" id="searchResults">';
+                        
+                        response.data.forEach(function(word, index) {
+                            html += '<div class="accordion-item">';
+                            html += '<h2 class="accordion-header" id="heading' + index + '">';
+                            html += '<button class="accordion-button ' + (index > 0 ? 'collapsed' : '') + '" type="button" data-bs-toggle="collapse" data-bs-target="#collapse' + index + '" aria-expanded="' + (index === 0 ? 'true' : 'false') + '" aria-controls="collapse' + index + '">';
+                            html += word.word + ' <span class="badge bg-secondary ms-2">' + word.type + '</span>';
+                            html += '</button>';
+                            html += '</h2>';
+                            
+                            html += '<div id="collapse' + index + '" class="accordion-collapse collapse ' + (index === 0 ? 'show' : '') + '" aria-labelledby="heading' + index + '" data-bs-parent="#searchResults">';
+                            html += '<div class="accordion-body">';
+                            
+                            html += '<div class="table-responsive">';
+                            html += '<table class="table table-bordered">';
+                            
+                            if (word.definition) {
+                                html += '<tr><th style="width: 150px;">Tanım</th><td>' + word.definition + '</td></tr>';
+                            }
+                            
+                            if (word.category) {
+                                html += '<tr><th>Kategori</th><td>' + word.category + '</td></tr>';
+                            }
+                            
+                            if (word.example) {
+                                html += '<tr><th>Örnek</th><td>' + word.example + '</td></tr>';
+                            }
+                            
+                            if (word.relations && word.relations.length > 0) {
+                                html += '<tr><th>İlişkiler</th><td>';
+                                word.relations.forEach(function(relation) {
+                                    html += '<span class="badge bg-info me-1 mb-1">' + relation + '</span>';
+                                });
+                                html += '</td></tr>';
+                            }
+                            
+                            if (word.created_at) {
+                                html += '<tr><th>Eklenme Tarihi</th><td>' + word.created_at + '</td></tr>';
+                            }
+                            
+                            html += '</table>';
+                            html += '</div>';
+                            
+                            html += '</div>';
+                            html += '</div>';
+                            html += '</div>';
+                        });
+                        
+                        html += '</div>';
+                        
+                        $('#searchResult').html(html);
+                    } else {
+                        $('#searchResult').html('<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i>Sonuç bulunamadı</div>');
+                    }
+                } else {
+                    $('#searchResult').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>' + response.message + '</div>');
+                }
+            },
+            error: function(xhr, status, error) {
+                $('#searchWordBtn').prop('disabled', false).html('<i class="bi bi-search me-1"></i> Ara');
+                $('#searchResult').html('<div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>Bir hata oluştu: ' + error + '</div>');
+            }
+        });
+    });
+
+    // Öğrenme sistemini temizle
+    $('#clearLearningBtn').click(function() {
+        if (confirm('Bu işlem tüm öğrenilen kelimeleri, ilişkileri ve kategorileri silecektir. Devam etmek istediğinize emin misiniz?')) {
+            $.ajax({
+                url: '/manage/learning/clear',
+                type: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                },
+                data: {
+                    confirm: 'yes'
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        alert('Öğrenme sistemi başarıyla temizlendi.');
+                        // Yenile
+                        window.location.reload();
+                    } else {
+                        alert('Hata: ' + response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    alert('Bir hata oluştu: ' + error);
+                }
+            });
+        }
+    });
+});
 </script>
-@endsection 
+@endsection

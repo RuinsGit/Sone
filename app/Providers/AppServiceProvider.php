@@ -23,5 +23,13 @@ class AppServiceProvider extends ServiceProvider
         if($this->app->environment('production')) {
             URL::forceScheme('https');
         }
+
+        // Learning System bağlantısı
+        $this->app->singleton('App\AI\Learn\LearningSystem', function ($app) {
+            return new \App\AI\Learn\LearningSystem(
+                $app->make('App\AI\Core\CategoryManager'),
+                $app->make('App\AI\Core\WordRelations')
+            );
+        });
     }
 }

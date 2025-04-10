@@ -69,6 +69,14 @@ class Kernel extends ConsoleKernel
         $schedule->command('ai:db-maintenance --mode=optimize')
                  ->weekly()
                  ->appendOutputTo(storage_path('logs/db-maintenance.log'));
+        
+        // Kategori sistemi güncelleme (5 dakikada bir çalıştır)
+        $schedule->command('ai:init-categories')
+                 ->everyFiveMinutes()
+                 ->appendOutputTo(storage_path('logs/category-update.log'))
+                 ->onFailure(function () {
+                     \Log::error('ai:init-categories komutu çalıştırılamadı');
+                 });
     }
 
     /**

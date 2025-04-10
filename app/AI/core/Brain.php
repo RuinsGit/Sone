@@ -18,6 +18,7 @@ class Brain
     private $lastThoughtTime;
     private $thoughtQueue = [];
     private $wordRelations;
+    private $categoryManager;
     
     public function __construct()
     {
@@ -28,12 +29,16 @@ class Brain
     
     private function initializeComponents()
     {
-        // Temel bileşenleri başlat
-        $this->memory = new Memory();
-        $this->emotions = new EmotionEngine();
-        $this->learning = new LearningSystem();
-        $this->consciousness = new Consciousness();
-        $this->wordRelations = app(\App\AI\Core\WordRelations::class);
+        try {
+            $this->consciousness = new Consciousness();
+            $this->memory = new Memory();
+            $this->wordRelations = app(\App\AI\Core\WordRelations::class);
+            $this->emotions = new EmotionEngine();
+            $this->categoryManager = new CategoryManager();
+            $this->learning = new LearningSystem($this->categoryManager, $this->wordRelations);
+        } catch (\Exception $e) {
+            \Log::error('Bileşen başlatma hatası: ' . $e->getMessage());
+        }
     }
     
     private function startBackgroundProcesses()
@@ -51,31 +56,33 @@ class Brain
     private function think()
     {
         try {
-            // Mevcut bilinç durumunu kontrol et
-            $consciousness = new Consciousness();
-            $consciousnessState = $consciousness->getStatus();
+            // Rastgele bellekteki anıları getir
+            $memories = $this->memory->getLongTermMemory();
             
-            // Son belirli sayıda anıyı al
-            $memories = $this->memory->getRecentMemories(50);
-            
-            // Bellek boşsa düşünme
+            // Eğer bellek boşsa düşünmeye gerek yok
             if (empty($memories)) {
                 return;
             }
             
-            // Mevcut duygusal durumu al
-            $emotionalState = $this->emotionEngine->getCurrentEmotion();
-            
-            // Hafızadan kalıplar bul
+            // Belleği analiz et
             $patterns = $this->findPatterns($memories);
             
-            // Kalıplardan kurallar oluştur
+            // Duygusal duruma göre cümleler üret
+            $emotionalState = $this->emotions->getCurrentEmotion();
+            
+            // Yeni cümleler üret
+            $this->generateAndLearnSentences($patterns, $emotionalState);
+            
+            // Metinleri kategorilere göre analiz et ve öğren
+            $this->learnCategoriesFromMemories($memories);
+            
+            // Kurallar oluştur
             $rules = $this->generateRules($patterns);
             
-            // Öğrenmeyi uygula
+            // Öğrenilenleri uygula
             $this->applyLearning($patterns, $rules);
             
-            // Bilinci güncelle
+            // Bilinç durumunu güncelle
             $this->updateConsciousness($patterns, $rules);
             
             // Yeni cümleler üret ve öğren
@@ -93,84 +100,141 @@ class Brain
     }
     
     /**
+     * Bellekteki verileri kategorilere ayır ve öğren
+     */
+    private function learnCategoriesFromMemories($memories)
+    {
+        if (empty($memories) || !$this->categoryManager) {
+            return;
+        }
+        
+        // En fazla 5 anıyı işle
+        $memoriesToProcess = array_slice($memories, 0, 5);
+        $totalLearned = 0;
+        
+        foreach ($memoriesToProcess as $memory) {
+            // Metin veya cümle içeriyorsa
+            if (is_string($memory)) {
+                $text = $memory;
+            } elseif (is_array($memory) && isset($memory['sentence'])) {
+                $text = $memory['sentence'];
+            } elseif (is_array($memory) && isset($memory['text'])) {
+                $text = $memory['text'];
+            } else {
+                continue;
+            }
+            
+            // Kategori belirtilmişse onu kullan
+            $category = null;
+            if (is_array($memory) && isset($memory['category'])) {
+                $category = $memory['category'];
+            }
+            
+            // Metinden öğren
+            $learnedCount = $this->categoryManager->learnFromText($text, $category);
+            $totalLearned += $learnedCount;
+        }
+        
+        // Öğrenme işlemi yapıldıysa logla
+        if ($totalLearned > 0) {
+            \Log::info("Kategorilere göre öğrenme tamamlandı: $totalLearned kelime işlendi");
+        }
+    }
+    
+    /**
      * Kalıplardan yeni cümleler üret ve öğren
      */
     private function generateAndLearnSentences($patterns, $emotionalState)
     {
         try {
-            // Consciousness nesnesi oluştur
-            $consciousness = new Consciousness();
+            // En uygun kalıpları seç
+            $selectedPatterns = [];
+            foreach ($patterns as $pattern => $info) {
+                if ($info['confidence'] > 0.5) {
+                    $selectedPatterns[] = $pattern;
+                }
+            }
             
-            // En az 3 kalıp varsa işleme devam et
-            if (count($patterns) < 3) {
+            // Eğer yeterli kalıp yoksa işlemi durdur
+            if (count($selectedPatterns) < 2) {
                 return;
             }
             
-            // En sık kullanılan kalıpları al (en fazla 5)
-            $topPatterns = array_slice($patterns, 0, 5);
+            // Kalıplardan cümleler oluştur
+            $sentences = [];
             
-            // Her bir kalıp için bir cümle üret
-            foreach ($topPatterns as $pattern) {
-                // Kavram tanımla
-                $concept = $pattern['pattern'];
+            // 1. Yöntem: Kategori tabanlı cümle üretimi
+            if ($this->categoryManager) {
+                // Rastgele 2 katagori seç
+                $categories = $this->categoryManager->getAllCategories();
                 
-                if (empty($concept) || strlen($concept) < 3) {
-                    continue;
-                }
-                
-                // Farklı cümle üretme yöntemleri kullan
-                $method = rand(0, 3);
-                $sentence = '';
-                
-                switch ($method) {
-                    case 0:
-                        // Kavramsal cümle üretimi
-                        $sentence = $this->wordRelations->generateConceptualSentence($concept);
-                        break;
-                    case 1:
-                        // İlişkisel cümle üretimi
-                        $sentence = $this->wordRelations->generateSentenceWithRelations($concept);
-                        break;
-                    case 2:
-                        // Duygusal cümle üretimi
-                        $emotion = $emotionalState['emotion'] ?? 'neutral';
-                        $sentence = $this->generateEmotionalSentence($concept, $emotion);
-                        break;
-                    case 3:
-                        // Bilinç tabanlı cümle üretimi
-                        $sentence = $consciousness->generateConceptualSentence($concept);
-                        break;
-                }
-                
-                // Üretilen cümle boş değilse öğren
-                if (!empty($sentence)) {
-                    // Cümleyi hafızaya kaydet
-                    $this->memory->addMemory($sentence, [
-                        'type' => 'generated',
-                        'concept' => $concept,
-                        'confidence' => $pattern['confidence'] ?? 0.7,
-                        'emotional_context' => $emotionalState
-                    ]);
+                if (count($categories) > 0) {
+                    $categoryIds = array_keys($categories);
                     
-                    // Cümleyi bilinç sistemine öğret
-                    $consciousness->update($sentence, $emotionalState);
-                    
-                    // Kelime ilişkilerini öğren
-                    $words = explode(' ', $sentence);
-                    $mainWord = $words[0];
-                    
-                    for ($i = 1; $i < count($words); $i++) {
-                        if (strlen($words[$i]) > 3) {
-                            $this->wordRelations->learnAssociation($mainWord, $words[$i], 'generated', 0.6);
+                    // 2 kategori için cümle üret
+                    for ($i = 0; $i < min(2, count($categoryIds)); $i++) {
+                        $randomIndex = array_rand($categoryIds);
+                        $categoryId = $categoryIds[$randomIndex];
+                        
+                        $sentence = $this->categoryManager->generateSentenceByCategory($categoryId);
+                        if (!empty($sentence)) {
+                            $sentences[] = $sentence;
                         }
+                        
+                        // Kullanılan kategoriyi listeden çıkar
+                        unset($categoryIds[$randomIndex]);
+                        if (empty($categoryIds)) break;
                     }
-                    
-                    // Öğrenilen cümleyi kaydet
-                    Log::info('Yeni cümle üretildi ve öğrenildi: ' . $sentence);
                 }
             }
+            
+            // 2. Yöntem: İlişkisel cümle üretimi
+            for ($i = 0; $i < 3; $i++) {
+                $randomIndex = array_rand($selectedPatterns);
+                $pattern = $selectedPatterns[$randomIndex];
+                
+                // İlişkisel cümle üret
+                $sentence = $this->wordRelations->generateConceptualSentence($pattern);
+                
+                if (!empty($sentence) && !in_array($sentence, $sentences)) {
+                    $sentences[] = $sentence;
+                }
+            }
+            
+            // 3. Yöntem: Duygusal cümle üretimi
+            $emotion = $emotionalState['emotion'];
+            if ($emotion && !in_array($emotion, ['neutral'])) {
+                for ($i = 0; $i < 2; $i++) {
+                    $randomIndex = array_rand($selectedPatterns);
+                    $pattern = $selectedPatterns[$randomIndex];
+                    
+                    // Duygusal cümle üret
+                    $sentence = $this->generateEmotionalSentence($pattern, $emotion);
+                    
+                    if (!empty($sentence) && !in_array($sentence, $sentences)) {
+                        $sentences[] = $sentence;
+                    }
+                }
+            }
+            
+            // Öğrenilen her cümleyi belleğe ekle (en fazla 5 cümle)
+            $sentencesToStore = array_slice($sentences, 0, 5);
+            foreach ($sentencesToStore as $sentence) {
+                // Belleğe kaydet
+                $this->memory->store([
+                    'sentence' => $sentence,
+                    'type' => 'generated',
+                    'timestamp' => time()
+                ], 'semantic');
+                
+                // Bilinçte de öğren
+                $this->consciousness->update($sentence, $emotionalState);
+            }
+            
+            return count($sentencesToStore);
         } catch (\Exception $e) {
-            Log::error('Cümle üretme hatası: ' . $e->getMessage());
+            \Log::error('Cümle üretme hatası: ' . $e->getMessage());
+            return 0;
         }
     }
     
@@ -476,7 +540,35 @@ class Brain
             }
         }
         
-        return $input;
+        // Girdiyi kategorilere göre analiz et
+        if ($this->categoryManager) {
+            $categories = $this->categoryManager->analyzeText($input);
+            
+            // En güçlü kategoriyi bul
+            $strongestCategory = null;
+            $maxScore = 0;
+            
+            foreach ($categories as $categoryId => $info) {
+                if ($info['score'] > $maxScore) {
+                    $maxScore = $info['score'];
+                    $strongestCategory = [
+                        'id' => $categoryId,
+                        'name' => $info['name'],
+                        'score' => $info['score']
+                    ];
+                }
+            }
+            
+            // Eğer güçlü bir kategori bulunduysa bellek sorgusuna ekle
+            if ($strongestCategory && $strongestCategory['score'] > 0.5) {
+                $meta['detected_category'] = $strongestCategory;
+            }
+        }
+        
+        return [
+            'processed_input' => $input,
+            'metadata' => $meta
+        ];
     }
     
     private function generateResponse($input, $emotionalContext, $memories)
@@ -910,6 +1002,20 @@ class Brain
                 $response .= " Daha önce benzer bir konuda konuştuğumuzu hatırlıyorum.";
             }
             
+            // 5. Kategorilerden cümle üretimi
+            if ($this->categoryManager && isset($metadata['detected_category'])) {
+                $categoryId = $metadata['detected_category']['id'];
+                $categorySentence = $this->categoryManager->generateSentenceByCategory($categoryId);
+                
+                if (!empty($categorySentence)) {
+                    $possibleResponses[] = [
+                        'text' => $categorySentence,
+                        'score' => 0.75 * $metadata['detected_category']['score'],
+                        'type' => 'category'
+                    ];
+                }
+            }
+            
             return $response;
         } catch (\Exception $e) {
             \Log::error('createNewResponse ana hata: ' . $e->getMessage() . ' - ' . $e->getTraceAsString());
@@ -1307,7 +1413,23 @@ class Brain
     
     public function getLearningStatus()
     {
-        return $this->learning->getStatus();
+        if ($this->learning === null) {
+            \Log::warning('Brain.getLearningStatus çağrıldı fakat learning nesnesi yok');
+            return [
+                'status' => 'error',
+                'message' => 'Öğrenme sistemi başlatılmadı'
+            ];
+        }
+        
+        try {
+            return $this->learning->getLearningStatus();
+        } catch (\Exception $e) {
+            \Log::error('Learning status alma hatası: ' . $e->getMessage());
+            return [
+                'status' => 'error',
+                'message' => 'Öğrenme durumu alınamadı: ' . $e->getMessage()
+            ];
+        }
     }
     
     public function getConsciousnessState()
@@ -1351,6 +1473,22 @@ class Brain
     public function getConsciousnessLevel()
     {
         return $this->consciousness->getSelfAwareness();
+    }
+    
+    /**
+     * Learning sistemini getir
+     */
+    public function getLearningSystem()
+    {
+        return $this->learning;
+    }
+    
+    /**
+     * Learning sistemini değiştir
+     */
+    public function setLearningSystem($learningSystem)
+    {
+        $this->learning = $learningSystem;
     }
     
     public function getWordRelations($word)
