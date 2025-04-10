@@ -2006,4 +2006,209 @@ class ChatController extends Controller
             \Log::error('Mesaj kaydetme hatası: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Bilinmeyen kelime/kavramları tespit et ve öğrenmeye çalış
+     */
+    private function handleUnknownTerm($term)
+    {
+        try {
+            // Son bilinmeyen sorguyu kaydet
+            session(['last_unknown_query' => $term]);
+            
+            // Terim veritabanında var mı kontrol et
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
+            $definition = $wordRelations->getDefinition($term);
+            
+            if (!empty($definition)) {
+                // Terim zaten biliniyor
+                return [
+                    'known' => true,
+                    'definition' => $definition
+                ];
+            }
+            
+            // AIData tablosunda kontrol et
+            $aiData = \App\Models\AIData::where('word', $term)->first();
+            if ($aiData && !empty($aiData->sentence)) {
+                return [
+                    'known' => true,
+                    'definition' => $aiData->sentence
+                ];
+            }
+            
+            // Terim bilinmiyor, kullanıcıdan açıklama istemek için
+            $questions = [
+                "{$term} ne demek? Bu kavram hakkında bilgim yok, bana açıklayabilir misiniz?",
+                "{$term} nedir? Bu kelimeyi bilmiyorum, öğrenmeme yardımcı olur musunuz?",
+                "Üzgünüm, '{$term}' kelimesinin anlamını bilmiyorum. Bana açıklayabilir misiniz?",
+                "'{$term}' hakkında bilgim yok. Bu kelime ne anlama geliyor?"
+            ];
+            
+            $response = $questions[array_rand($questions)];
+            
+            \Log::info("Bilinmeyen terim sorgusu: " . $term);
+            
+            return [
+                'known' => false,
+                'response' => $response
+            ];
+            
+        } catch (\Exception $e) {
+            \Log::error("Bilinmeyen terim işleme hatası: " . $e->getMessage());
+            return [
+                'known' => false,
+                'response' => "Üzgünüm, bu kavram hakkında bir bilgim yok. Bana açıklayabilir misiniz?"
+            ];
+        }
+    }
+    
+    /**
+     * Kullanıcının öğrettiği kavramı işle ve kaydet
+     */
+    private function learnNewConcept($word, $definition)
+    {
+        try {
+            // WordRelations sınıfıyla tanımı öğren
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
+            $wordRelations->learnDefinition($word, $definition, true);
+            
+            // AIData tablosuna da ekle
+            $aiData = \App\Models\AIData::updateOrCreate(
+                ['word' => $word],
+                [
+                    'sentence' => $definition,
+                    'category' => 'user_taught',
+                    'language' => 'tr',
+                    'frequency' => \DB::raw('COALESCE(frequency, 0) + 3'),
+                    'confidence' => 0.9,
+                    'context' => 'Kullanıcı tarafından öğretildi - ' . now()->format('Y-m-d')
+                ]
+            );
+            
+            // Yanıt için teşekkür mesajları
+            $responses = [
+                "Teşekkür ederim! '{$word}' kavramını öğrendim.",
+                "Bu açıklamayı kaydettim. Artık '{$word}' terimini biliyorum.",
+                "Bilgi paylaşımınız için teşekkürler. '{$word}' kelimesini öğrendim.",
+                "Harika! '{$word}' kelimesinin anlamını artık biliyorum."
+            ];
+            
+            \Log::info("Yeni kavram öğrenildi: " . $word . " = " . $definition);
+            
+            return [
+                'success' => true,
+                'response' => $responses[array_rand($responses)]
+            ];
+            
+        } catch (\Exception $e) {
+            \Log::error("Kavram öğrenme hatası: " . $e->getMessage());
+            return [
+                'success' => false,
+                'response' => "Bu kavramı öğrenmeye çalışırken bir sorun oluştu, ancak açıklamanızı dikkate aldım."
+            ];
+        }
+    }
+
+    /**
+     * Soru sorularını işleyerek cevap döndürür
+     */
+    private function processQuestionPattern($message)
+    {
+        // Soru kalıplarını kontrol et
+        $pattern = $this->checkQuestionPattern($message);
+        
+        if (!$pattern) {
+            return false;
+        }
+        
+        try {
+            $type = $pattern['type'];
+            $term = trim($pattern['term']);
+            
+            // Kelime veya terim çok kısa ise işleme
+            if (strlen($term) < 2) {
+                return "Sorgunuz çok kısa. Lütfen daha açıklayıcı bir soru sorun.";
+            }
+            
+            // Term sorgusu - önce veritabanında arama yap
+            $result = $this->processTermQuery($term);
+            
+            // Eğer sonuç bulunduysa (başka bir yerden)
+            if (!empty($result) && $result !== "Bu konu hakkında bilgim yok.") {
+                return $result;
+            }
+            
+            // Burada terim bilinmiyor, öğrenmeye çalış
+            $unknownResult = $this->handleUnknownTerm($term);
+            
+            if (!$unknownResult['known']) {
+                // Bilinmeyen terim, kullanıcıdan açıklama iste
+                return $unknownResult['response'];
+            } else {
+                // Terim biliniyor ama başka kaynaklarda bulunmadı
+                return $unknownResult['definition'];
+            }
+        } catch (\Exception $e) {
+            \Log::error("Soru işleme hatası: " . $e->getMessage());
+            return "Bu soruyu işlemekte problem yaşadım. Lütfen başka şekilde sormayı deneyin.";
+        }
+    }
+
+    /**
+     * Öğrenme kalıplarını işler
+     */
+    private function processLearningPattern($message)
+    {
+        // Öğrenme kalıbını kontrol et
+        $pattern = $this->checkLearningPattern($message);
+        
+        if (!$pattern) {
+            // Son bilinmeyen sorgu kontrolü yap
+            $lastQuery = session('last_unknown_query', '');
+            
+            // "Bu ... demektir", "Anlamı ... dır" gibi kalıpları kontrol et
+            if (!empty($lastQuery) && 
+                (preg_match('/^bu\s+(.+?)(?:\s+demektir)?\.?$/i', $message, $matches) ||
+                 preg_match('/^anlamı\s+(.+?)(?:\s+d[ıi]r)?\.?$/i', $message, $matches) ||
+                 preg_match('/^(.+?)\s+demektir\.?$/i', $message, $matches))) {
+                
+                $definition = trim($matches[1]);
+                
+                // Yeni kavramı öğren
+                $learnResult = $this->learnNewConcept($lastQuery, $definition);
+                
+                // Son sorguyu temizle
+                session(['last_unknown_query' => '']);
+                
+                return $learnResult['response'];
+            }
+            
+            return false;
+        }
+        
+        try {
+            $word = trim($pattern['word']);
+            $definition = trim($pattern['definition']);
+            
+            // Kelime geçerliliğini kontrol et
+            if (strlen($word) < 2) {
+                return "Öğretmek istediğiniz kelime çok kısa.";
+            }
+            
+            // Tanım geçerliliğini kontrol et
+            if (strlen($definition) < 3) {
+                return "Tanımınız çok kısa, lütfen daha açıklayıcı bir tanım verin.";
+            }
+            
+            // Yeni kavramı öğren
+            $learnResult = $this->learnNewConcept($word, $definition);
+            
+            return $learnResult['response'];
+            
+        } catch (\Exception $e) {
+            \Log::error("Öğrenme kalıbı işleme hatası: " . $e->getMessage());
+            return "Bu bilgiyi öğrenmeye çalışırken bir sorun oluştu, ancak açıklamanızı dikkate aldım.";
+        }
+    }
 } 
