@@ -1555,127 +1555,184 @@ class ChatController extends Controller
             return 'Mesajınız çok uzun. Lütfen daha kısa bir mesaj yazın.';
         }
         
-        // Kullanıcının gönderdiği mesajdan öğren (kelime ilişkileri)
-        if (strlen($userMessage) > 20) {
-            // Uzun mesajlardan kelime ilişkilerini öğren
-            $this->learnWordRelations($userMessage);
-        }
-        
-        // Basit selamlaşma ve hal hatır sorma kalıpları için özel yanıtlar
-        $greetingResponse = $this->handleGreetings($userMessage);
-        if ($greetingResponse) {
-            return $greetingResponse;
-        }
-        
-        // Öğrenme ve soru kalıplarını kontrol et
-        if ($response = $this->processLearningPattern($userMessage)) {
-            return $response;
-        }
-        
-        if ($response = $this->processQuestionPattern($userMessage)) {
-            return $response;
-        }
-        
-        // Kişisel sorular için özel yanıtlar (AI hakkında sorular)
-        $personalResponse = $this->handlePersonalQuestions($userMessage);
-        if ($personalResponse) {
-            return $personalResponse;
-        }
-        
-        // Basit tek kelimelik sorgu kontrolü
-        $singleWordResponse = $this->handleSingleWordMessages($userMessage);
-        if ($singleWordResponse) {
-            return $singleWordResponse;
-        }
-        
-        // Normal mesaj işleme - Brain üzerinden yap
-        $response = $this->processNormalMessage($userMessage);
-        
-        // Yanıtın özgünlüğünü artırmak için konuşma tarzını değiştir (% 35 olasılıkla)
-        if (mt_rand(1, 100) <= 35) {
-            $response = $this->enhanceResponseStyle($response);
-        }
-        
-        return $response;
-    }
-    
-    /**
-     * Yanıtın konuşma tarzını geliştir
-     * 
-     * @param string $response AI yanıtı
-     * @return string Geliştirilmiş yanıt
-     */
-    private function enhanceResponseStyle($response)
-    {
         try {
-            // Yanıt çok kısaysa işlem yapma
-            if (mb_strlen($response, 'UTF-8') < 30) {
-                return $response;
-            }
+            // WordRelations sınıfını yükle
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
             
-            // Konuşma tarzları
-            $styles = [
-                'scholarly' => [
-                    'intro' => ["Analiz ettiğimizde, ", "Bilimsel perspektiften bakarsak, ", "Araştırmalara göre, "],
-                    'words' => ["muhtemelen", "özellikle", "nitekim", "varsayarsak", "dolayısıyla", "sonuç olarak"],
-                    'endings' => [" Bu analizi derinleştirebiliriz.", " Bu konuda farklı perspektifler de mevcut.", " Sizin bu konudaki düşünceleriniz nedir?"]
-                ],
-                'friendly' => [
-                    'intro' => ["Bence ", "Açıkçası ", "Kişisel görüşüm şu ki "],
-                    'words' => ["harika", "ilginç", "keyifli", "düşündürücü", "etkileyici", "mükemmel"],
-                    'endings' => [" Ne dersiniz?", " Siz ne düşünüyorsunuz?", " Sizce de öyle değil mi?"]
-                ],
-                'thoughtful' => [
-                    'intro' => ["Düşündüğümde, ", "Derinlemesine incelediğimizde, ", "Özünde, "],
-                    'words' => ["belki de", "aslında", "temelde", "özünde", "bir yandan", "öte yandan"],
-                    'endings' => [" Belki de bu konuyu biraz daha düşünmeliyiz.", " Bu konu üzerinde daha fazla düşünmek gerekiyor.", " Farklı açılardan bakmak ilginç olabilir."]
-                ]
-            ];
+            // Öğrenme sistemini yükle
+            $brain = app(\App\AI\Core\Brain::class);
+            $learningSystem = $brain->getLearningSystem();
             
-            // Rastgele bir tarz seç
-            $styleKey = array_rand($styles);
-            $style = $styles[$styleKey];
-            
-            // Giriş cümlesi ekle mi?
-            if (mt_rand(1, 100) <= 40) {
-                $intro = $style['intro'][array_rand($style['intro'])];
+            // Kullanıcının gönderdiği mesajdan öğren (kelime ilişkileri)
+            if (strlen($userMessage) > 20) {
+                // Uzun mesajlardan kelime ilişkilerini öğren
+                $this->learnWordRelations($userMessage);
                 
-                // Yanıtın ilk harfini küçült
-                if (mb_strlen($response, 'UTF-8') > 0) {
-                    $firstChar = mb_substr($response, 0, 1, 'UTF-8');
-                    $rest = mb_substr($response, 1, null, 'UTF-8');
-                    $response = $intro . mb_strtolower($firstChar, 'UTF-8') . $rest;
-                }
-            }
-            
-            // Belirli kelimeleri tarz kelimelerine dönüştür
-            $stylishWords = $style['words'];
-            foreach ($stylishWords as $word) {
-                // %25 olasılıkla yanıta bu kelimeyi ekle
-                if (mt_rand(1, 100) <= 25 && strpos($response, $word) === false) {
-                    $sentences = preg_split('/(?<=[.!?])\s+/', $response, -1, PREG_SPLIT_NO_EMPTY);
-                    if (count($sentences) >= 2) {
-                        $randomSentenceIndex = mt_rand(0, count($sentences) - 1);
-                        $sentences[$randomSentenceIndex] = str_replace(
-                            ['. ', '! ', '? '], 
-                            [". $word ", "! $word ", "? $word "], 
-                            $sentences[$randomSentenceIndex]
-                        );
-                        $response = implode(' ', $sentences);
+                // Mesajdaki her kelimeyi kontrol et ve bilinmeyen kelimeleri öğren
+                $words = preg_split('/\s+/', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $userMessage));
+                foreach ($words as $word) {
+                    if (strlen($word) >= 3 && !in_array(strtolower($word), ['için', 'gibi', 'daha', 'bile', 'kadar', 'nasıl', 'neden'])) {
+                        // Kelime veritabanında var mı kontrol et
+                        $exists = \App\Models\AIData::where('word', $word)->exists();
+                        
+                        // Eğer kelime veritabanında yoksa ve geçerli bir kelimeyse öğren
+                        if (!$exists && $wordRelations->isValidWord($word)) {
+                            try {
+                                Log::info("Kullanıcı mesajından yeni kelime öğreniliyor: " . $word);
+                                $learningSystem->learnWord($word);
+                            } catch (\Exception $e) {
+                                Log::error("Kelime öğrenme hatası: " . $e->getMessage(), ['word' => $word]);
+                            }
+                        }
                     }
                 }
             }
             
-            // Sonuç cümlesi ekle mi?
-            if (mt_rand(1, 100) <= 30) {
-                $ending = $style['endings'][array_rand($style['endings'])];
-                $response .= $ending;
+            // Basit selamlaşma ve hal hatır sorma kalıpları için özel yanıtlar
+            $greetingResponse = $this->handleGreetings($userMessage);
+            if ($greetingResponse) {
+                return $this->enhanceResponseWithWordRelations($greetingResponse);
             }
             
+            // Öğrenme ve soru kalıplarını kontrol et
+            if ($response = $this->processLearningPattern($userMessage)) {
+                return $this->enhanceResponseWithWordRelations($response);
+            }
+            
+            if ($response = $this->processQuestionPattern($userMessage)) {
+                return $this->enhanceResponseWithWordRelations($response);
+            }
+            
+            // Kişisel sorular için özel yanıtlar (AI hakkında sorular)
+            $personalResponse = $this->handlePersonalQuestions($userMessage);
+            if ($personalResponse) {
+                return $this->enhanceResponseWithWordRelations($personalResponse);
+            }
+            
+            // Basit tek kelimelik sorgu kontrolü
+            $singleWordResponse = $this->handleSingleWordMessages($userMessage);
+            if ($singleWordResponse) {
+                return $this->enhanceResponseWithWordRelations($singleWordResponse);
+            }
+            
+            // Normal mesaj işleme - Brain üzerinden yap
+            $response = $this->processNormalMessage($userMessage);
+            
+            // Yanıtın özgünlüğünü artırmak için konuşma tarzını değiştir ve kelime ilişkilerini kullan
+            return $this->enhanceResponseWithWordRelations($response);
+            
+        } catch (\Exception $e) {
+            Log::error("Mesaj işleme hatası: " . $e->getMessage());
+            return "Mesajınızı işlerken bir sorun oluştu. Lütfen tekrar deneyin.";
+        }
+    }
+    
+    /**
+     * Yanıtı kelime ilişkileriyle zenginleştir
+     * 
+     * @param string $response Orijinal yanıt
+     * @return string Zenginleştirilmiş yanıt
+     */
+    private function enhanceResponseWithWordRelations($response)
+    {
+        try {
+            // Kelime ilişkileri sınıfını yükle
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
+            
+            // Yanıt zaten yeterince uzunsa veya %30 ihtimalle ek yapmıyoruz
+            if (strlen($response) > 150 || mt_rand(1, 100) <= 30) {
+                return $response;
+            }
+            
+            // Yanıttaki önemli kelimeleri bul
+            $words = preg_split('/\s+/', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $response));
+            $importantWords = [];
+            
+            foreach ($words as $word) {
+                if (strlen($word) >= 3 && !in_array(strtolower($word), ['için', 'gibi', 'daha', 'bile', 'kadar', 'nasıl', 'neden'])) {
+                    $importantWords[] = $word;
+                }
+            }
+            
+            // Önemli kelime yoksa orijinal yanıtı döndür
+            if (empty($importantWords)) {
+                return $response;
+            }
+            
+            // Rasgele bir kelime seç
+            $selectedWord = $importantWords[array_rand($importantWords)];
+            
+            // 50% ihtimalle eş anlamlı, 25% ihtimalle zıt anlamlı, 25% ihtimalle akıllı cümle
+            $random = mt_rand(1, 100);
+            
+            if ($random <= 50) {
+                // Eş anlamlılarla ilgili bilgi ekle
+                $synonyms = $wordRelations->getSynonyms($selectedWord);
+                
+                if (!empty($synonyms)) {
+                    $synonym = array_rand($synonyms);
+                    $additions = [
+                        "Bu arada, '$selectedWord' kelimesinin eş anlamlısı '$synonym' kelimesidir.",
+                        "'$selectedWord' ve '$synonym' benzer anlamlara sahiptir.",
+                        "$selectedWord yerine $synonym da kullanılabilir."
+                    ];
+                    
+                    $selectedAddition = $additions[array_rand($additions)];
+                    
+                    // Doğruluk kontrolü
+                    $accuracy = $wordRelations->calculateSentenceAccuracy($selectedAddition, $selectedWord);
+                    
+                    if ($accuracy >= 0.6) {
+                        Log::info("Eş anlamlı bilgi eklendi: $selectedAddition (Doğruluk: $accuracy)");
+                        return $response . " " . $selectedAddition;
+                    } else {
+                        Log::info("Eş anlamlı bilgi doğruluk kontrolünden geçemedi: $selectedAddition (Doğruluk: $accuracy)");
+                    }
+                }
+            } elseif ($random <= 75) {
+                // Zıt anlamlılarla ilgili bilgi ekle
+                $antonyms = $wordRelations->getAntonyms($selectedWord);
+                
+                if (!empty($antonyms)) {
+                    $antonym = array_rand($antonyms);
+                    $additions = [
+                        "Bu arada, '$selectedWord' kelimesinin zıt anlamlısı '$antonym' kelimesidir.",
+                        "'$selectedWord' ve '$antonym' zıt anlamlara sahiptir.",
+                        "$selectedWord kelimesinin tam tersi $antonym olarak ifade edilir."
+                    ];
+                    
+                    $selectedAddition = $additions[array_rand($additions)];
+                    
+                    // Doğruluk kontrolü
+                    $accuracy = $wordRelations->calculateSentenceAccuracy($selectedAddition, $selectedWord);
+                    
+                    if ($accuracy >= 0.6) {
+                        Log::info("Zıt anlamlı bilgi eklendi: $selectedAddition (Doğruluk: $accuracy)");
+                        return $response . " " . $selectedAddition;
+                    } else {
+                        Log::info("Zıt anlamlı bilgi doğruluk kontrolünden geçemedi: $selectedAddition (Doğruluk: $accuracy)");
+                    }
+                }
+            } else {
+                // Akıllı cümle üret - doğruluk kontrolü bu metod içinde yapılıyor
+                try {
+                    // Minimum doğruluk değeri 0.6 ile cümle üret
+                    $sentences = $wordRelations->generateSmartSentences($selectedWord, true, 1, 0.6);
+                    
+                    if (!empty($sentences)) {
+                        Log::info("Akıllı cümle eklendi: " . $sentences[0]);
+                        return $response . " " . $sentences[0];
+                    }
+                } catch (\Exception $e) {
+                    Log::error("Akıllı cümle üretme hatası: " . $e->getMessage());
+                }
+            }
+            
+            // Hiçbir ekleme yapılamadıysa orijinal yanıtı döndür
             return $response;
             
         } catch (\Exception $e) {
-            \Log::error('Yanıt stilini geliştirme hatası: ' . $e->getMessage());
+            Log::error("Yanıt zenginleştirme hatası: " . $e->getMessage());
             return $response; // Hata durumunda orijinal yanıtı döndür
         }
     }

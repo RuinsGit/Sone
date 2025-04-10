@@ -427,20 +427,45 @@ class ManageController extends Controller
             // Parametreleri doğrula
             $request->validate([
                 'count' => 'nullable|integer|min:1|max:50',
-                'save' => 'nullable|boolean'
+                'save' => 'nullable|string'
             ]);
             
             $count = $request->input('count', 10);
-            $save = $request->input('save', true);
+            $save = $request->input('save') === "1";
+            
+            // Debug için log
+            Log::info("Otomatik cümle oluşturma başladı: count=$count, save=" . ($save ? 'true' : 'false'));
             
             // LearningSystem'ı yükle
             $learningSystem = $this->loadLearningSystem();
+            if (!$learningSystem) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Öğrenme sistemi başlatılamadı'
+                ], 500);
+            }
             
             // WordRelations sınıfını başlat
             $wordRelations = app(WordRelations::class);
             
-            // Otomatik olarak kelimeler seç
-            $words = $learningSystem->getAutomaticWordsToLearn($count);
+            // Önce öğrenilmiş kelimeleri kontrol et
+            $learnedWords = AIData::pluck('word')->toArray();
+            
+            if (count($learnedWords) > 0) {
+                Log::info("Veritabanında " . count($learnedWords) . " öğrenilmiş kelime bulundu");
+                
+                // Önce mevcut kelimelerden bazılarını kullan
+                $randomLearnedWords = array_slice($learnedWords, 0, min(intval($count/2), 5));
+                
+                // Kalan sayıda yeni kelime öğren
+                $remainingCount = $count - count($randomLearnedWords);
+                $newWords = $learningSystem->getAutomaticWordsToLearn($remainingCount);
+                
+                $words = array_merge($randomLearnedWords, $newWords);
+            } else {
+                // Hiç öğrenilmiş kelime yoksa tamamen yeni kelimeler seç
+                $words = $learningSystem->getAutomaticWordsToLearn($count);
+            }
             
             if (empty($words)) {
                 return response()->json([
@@ -456,23 +481,37 @@ class ManageController extends Controller
             
             // Her kelime için cümle oluştur
             foreach ($words as $word) {
-                // Önce kelimeyi öğren (eğer öğrenilmemişse)
-                if (!AIData::where('word', $word)->exists()) {
-                    $result = $learningSystem->learnWord($word);
-                    if ($result['success']) {
-                        $learnedWords[] = $word;
-                    } else {
-                        Log::warning("Kelime öğrenme hatası: " . $result['message']);
-                        continue;
+                try {
+                    // Önce kelimeyi öğren (eğer öğrenilmemişse)
+                    if (!AIData::where('word', $word)->exists()) {
+                        $result = $learningSystem->learnWord($word);
+                        if ($result['success']) {
+                            $learnedWords[] = $word;
+                            Log::info("$word kelimesi başarıyla öğrenildi");
+                        } else {
+                            Log::warning("Kelime öğrenme hatası: " . $result['message']);
+                            continue;
+                        }
                     }
+                    
+                    // Akıllı cümleler oluştur
+                    $sentences = $wordRelations->generateSmartSentences($word, $save, 3);
+                    
+                    Log::info("$word kelimesi için " . count($sentences) . " cümle oluşturuldu");
+                    
+                    if (!empty($sentences)) {
+                        $allSentences[$word] = $sentences;
+                    }
+                } catch (\Exception $e) {
+                    Log::error("$word kelimesi işlenirken hata: " . $e->getMessage());
                 }
-                
-                // Akıllı cümleler oluştur
-                $sentences = $wordRelations->generateSmartSentences($word, $save, 3);
-                
-                if (!empty($sentences)) {
-                    $allSentences[$word] = $sentences;
-                }
+            }
+            
+            if (empty($allSentences)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hiç cümle oluşturulamadı. Sistem kelime öğreniyor olabilir, lütfen biraz bekleyin ve tekrar deneyin.'
+                ]);
             }
             
             return response()->json([

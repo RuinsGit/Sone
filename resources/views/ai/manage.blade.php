@@ -846,7 +846,7 @@ $(document).ready(function() {
         const count = $('#autoWordCount').val();
         const saveChecked = $('#autoSaveSentences').is(':checked');
         
-        $('#autoSentencesResult .auto-sentences-list').html('<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Yükleniyor...</span></div>');
+        $('#autoSentencesResult .auto-sentences-list').html('<div class="text-center"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Kelimeler seçiliyor ve cümleler oluşturuluyor...</p><p class="text-muted small">Bu işlem biraz zaman alabilir</p></div>');
         
         $.ajax({
             url: '/api/manage/learning/auto-sentences',
@@ -873,7 +873,7 @@ $(document).ready(function() {
                             html += '<h2 class="accordion-header" id="autoHeading' + index + '">';
                             html += '<button class="accordion-button ' + (index === 0 ? '' : 'collapsed') + '" type="button" data-bs-toggle="collapse" data-bs-target="#autoCollapse' + index + '" aria-expanded="' + (index === 0 ? 'true' : 'false') + '" aria-controls="autoCollapse' + index + '">';
                             html += word;
-                            if (response.data.newly_learned.includes(word)) {
+                            if (response.data.newly_learned && response.data.newly_learned.includes(word)) {
                                 html += ' <span class="badge bg-success ms-2">Yeni Öğrenildi</span>';
                             }
                             html += '</button>';
@@ -902,7 +902,12 @@ $(document).ready(function() {
                     
                     $('#autoSentencesResult .auto-sentences-list').html(html);
                 } else {
-                    $('#autoSentencesResult .auto-sentences-list').html('<div class="alert alert-danger">' + response.message + '</div>');
+                    $('#autoSentencesResult .auto-sentences-list').html('<div class="alert alert-danger">' + response.message + '</div><div class="text-center mt-3"><button class="btn btn-warning btn-sm" id="retryAutoSentences"><i class="bi bi-arrow-repeat"></i> Tekrar Dene</button></div>');
+                    
+                    // Tekrar deneme butonu
+                    $('#retryAutoSentences').click(function() {
+                        $('#autoSentencesForm').submit();
+                    });
                 }
             },
             error: function(xhr) {
@@ -910,7 +915,12 @@ $(document).ready(function() {
                 if (xhr.responseJSON && xhr.responseJSON.message) {
                     errorMessage = xhr.responseJSON.message;
                 }
-                $('#autoSentencesResult .auto-sentences-list').html('<div class="alert alert-danger">' + errorMessage + '</div>');
+                $('#autoSentencesResult .auto-sentences-list').html('<div class="alert alert-danger">' + errorMessage + '</div><div class="text-center mt-3"><p class="text-muted">Sistem kelimeler öğreniyor olabilir, biraz bekleyin ve tekrar deneyin</p><button class="btn btn-warning btn-sm" id="retryAutoSentences"><i class="bi bi-arrow-repeat"></i> Tekrar Dene</button></div>');
+                
+                // Tekrar deneme butonu
+                $('#retryAutoSentences').click(function() {
+                    $('#autoSentencesForm').submit();
+                });
             }
         });
     });

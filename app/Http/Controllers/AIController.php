@@ -29,6 +29,12 @@ class AIController extends Controller
             // Brain nesnesini oluştur
             $brain = app(Brain::class);
             
+            // Öğrenme sistemini al
+            $learningSystem = $brain->getLearningSystem();
+            
+            // WordRelations sınıfını yükle
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
+            
             // Kullanıcı mesajı
             $message = $request->input('message');
             
@@ -56,13 +62,39 @@ class AIController extends Controller
                 'sender' => 'user'
             ]);
             
+            // Mesajdaki yeni kelimeleri öğren
+            if (strlen($message) > 10) {
+                // Mesajı kelimelere ayır
+                $words = preg_split('/\s+/', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $message));
+                
+                foreach ($words as $word) {
+                    if (strlen($word) >= 3 && !in_array(strtolower($word), ['için', 'gibi', 'daha', 'bile', 'kadar', 'nasıl', 'neden'])) {
+                        // Kelime veritabanında var mı kontrol et
+                        $exists = \App\Models\AIData::where('word', $word)->exists();
+                        
+                        // Eğer kelime veritabanında yoksa ve geçerli bir kelimeyse öğren
+                        if (!$exists && $wordRelations->isValidWord($word)) {
+                            try {
+                                Log::info("API üzerinden yeni kelime öğreniliyor: " . $word);
+                                $learningSystem->learnWord($word);
+                            } catch (\Exception $e) {
+                                Log::error("Kelime öğrenme hatası: " . $e->getMessage(), ['word' => $word]);
+                            }
+                        }
+                    }
+                }
+            }
+            
             // Yapay zeka yanıtını al
             $response = $brain->processInput($message);
+            
+            // Yanıtı kelime ilişkileriyle zenginleştir
+            $enhancedResponse = $this->enhanceResponseWithWordRelations($response);
             
             // AI mesajını kaydet
             ChatMessage::create([
                 'chat_id' => $chat->id,
-                'content' => $response,
+                'content' => $enhancedResponse,
                 'sender' => 'ai'
             ]);
             
@@ -70,7 +102,7 @@ class AIController extends Controller
                 'success' => true,
                 'data' => [
                     'chat_id' => $chat->id,
-                    'response' => $response
+                    'response' => $enhancedResponse
                 ]
             ]);
         } catch (\Exception $e) {
@@ -80,6 +112,116 @@ class AIController extends Controller
                 'success' => false,
                 'message' => 'AI yanıt hatası: ' . $e->getMessage()
             ], 500);
+        }
+    }
+    
+    /**
+     * Yanıtı kelime ilişkileriyle zenginleştir
+     * 
+     * @param string $response Orijinal yanıt
+     * @return string Zenginleştirilmiş yanıt
+     */
+    private function enhanceResponseWithWordRelations($response)
+    {
+        try {
+            // Kelime ilişkileri sınıfını yükle
+            $wordRelations = app(\App\AI\Core\WordRelations::class);
+            
+            // Yanıt zaten yeterince uzunsa veya %30 ihtimalle ek yapmıyoruz
+            if (strlen($response) > 150 || mt_rand(1, 100) <= 30) {
+                return $response;
+            }
+            
+            // Yanıttaki önemli kelimeleri bul
+            $words = preg_split('/\s+/', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $response));
+            $importantWords = [];
+            
+            foreach ($words as $word) {
+                if (strlen($word) >= 3 && !in_array(strtolower($word), ['için', 'gibi', 'daha', 'bile', 'kadar', 'nasıl', 'neden'])) {
+                    $importantWords[] = $word;
+                }
+            }
+            
+            // Önemli kelime yoksa orijinal yanıtı döndür
+            if (empty($importantWords)) {
+                return $response;
+            }
+            
+            // Rasgele bir kelime seç
+            $selectedWord = $importantWords[array_rand($importantWords)];
+            
+            // 50% ihtimalle eş anlamlı, 25% ihtimalle zıt anlamlı, 25% ihtimalle akıllı cümle
+            $random = mt_rand(1, 100);
+            
+            if ($random <= 50) {
+                // Eş anlamlılarla ilgili bilgi ekle
+                $synonyms = $wordRelations->getSynonyms($selectedWord);
+                
+                if (!empty($synonyms)) {
+                    $synonym = array_rand($synonyms);
+                    $additions = [
+                        "Bu arada, '$selectedWord' kelimesinin eş anlamlısı '$synonym' kelimesidir.",
+                        "'$selectedWord' ve '$synonym' benzer anlamlara sahiptir.",
+                        "$selectedWord yerine $synonym da kullanılabilir."
+                    ];
+                    
+                    $selectedAddition = $additions[array_rand($additions)];
+                    
+                    // Doğruluk kontrolü
+                    $accuracy = $wordRelations->calculateSentenceAccuracy($selectedAddition, $selectedWord);
+                    
+                    if ($accuracy >= 0.6) {
+                        Log::info("Eş anlamlı bilgi eklendi: $selectedAddition (Doğruluk: $accuracy)");
+                        return $response . " " . $selectedAddition;
+                    } else {
+                        Log::info("Eş anlamlı bilgi doğruluk kontrolünden geçemedi: $selectedAddition (Doğruluk: $accuracy)");
+                    }
+                }
+            } elseif ($random <= 75) {
+                // Zıt anlamlılarla ilgili bilgi ekle
+                $antonyms = $wordRelations->getAntonyms($selectedWord);
+                
+                if (!empty($antonyms)) {
+                    $antonym = array_rand($antonyms);
+                    $additions = [
+                        "Bu arada, '$selectedWord' kelimesinin zıt anlamlısı '$antonym' kelimesidir.",
+                        "'$selectedWord' ve '$antonym' zıt anlamlara sahiptir.",
+                        "$selectedWord kelimesinin tam tersi $antonym olarak ifade edilir."
+                    ];
+                    
+                    $selectedAddition = $additions[array_rand($additions)];
+                    
+                    // Doğruluk kontrolü
+                    $accuracy = $wordRelations->calculateSentenceAccuracy($selectedAddition, $selectedWord);
+                    
+                    if ($accuracy >= 0.6) {
+                        Log::info("Zıt anlamlı bilgi eklendi: $selectedAddition (Doğruluk: $accuracy)");
+                        return $response . " " . $selectedAddition;
+                    } else {
+                        Log::info("Zıt anlamlı bilgi doğruluk kontrolünden geçemedi: $selectedAddition (Doğruluk: $accuracy)");
+                    }
+                }
+            } else {
+                // Akıllı cümle üret - doğruluk kontrolü bu metod içinde yapılıyor
+                try {
+                    // Minimum doğruluk değeri 0.6 ile cümle üret
+                    $sentences = $wordRelations->generateSmartSentences($selectedWord, true, 1, 0.6);
+                    
+                    if (!empty($sentences)) {
+                        Log::info("Akıllı cümle eklendi: " . $sentences[0]);
+                        return $response . " " . $sentences[0];
+                    }
+                } catch (\Exception $e) {
+                    Log::error("Akıllı cümle üretme hatası: " . $e->getMessage());
+                }
+            }
+            
+            // Hiçbir ekleme yapılamadıysa orijinal yanıtı döndür
+            return $response;
+            
+        } catch (\Exception $e) {
+            Log::error("Yanıt zenginleştirme hatası: " . $e->getMessage());
+            return $response; // Hata durumunda orijinal yanıtı döndür
         }
     }
     

@@ -1064,15 +1064,117 @@ class WordRelations
     }
     
     /**
+     * Üretilen cümlenin doğruluk payını hesapla
+     * 
+     * @param string $sentence Cümle
+     * @param string $mainWord Ana kelime
+     * @return float Doğruluk puanı (0-1 arası)
+     */
+    public function calculateSentenceAccuracy($sentence, $mainWord)
+    {
+        try {
+            $accuracy = 0.5; // Başlangıç puanı
+            
+            // Cümle boş mu kontrol et
+            if (empty($sentence) || strlen($sentence) < 5) {
+                return 0.0;
+            }
+            
+            // Ana kelime cümlede geçiyor mu?
+            if (stripos($sentence, $mainWord) !== false) {
+                $accuracy += 0.2; // Ana kelime cümlede geçiyorsa bonus
+            }
+            
+            // Cümle içindeki diğer kelimeleri kontrol et
+            $words = preg_split('/\s+/', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $sentence));
+            $mainWordData = null;
+            $validRelations = 0;
+            $totalRelations = 0;
+            
+            // Ana kelime verilerini al
+            $mainWordData = \App\Models\AIData::where('word', $mainWord)->first();
+            
+            if ($mainWordData) {
+                // Ana kelimenin sıklık ve güven puanlarını kullan
+                $accuracy += min(0.1, ($mainWordData->frequency / 100)); // Sıklığı yüksekse bonus
+                $accuracy += min(0.1, $mainWordData->confidence); // Güven puanı yüksekse bonus
+                
+                // İlişkili kelimeleri kontrol et
+                $relatedWords = json_decode($mainWordData->related_words, true) ?: [];
+                
+                foreach ($words as $word) {
+                    if (strlen($word) >= 3 && $word != $mainWord) {
+                        $totalRelations++;
+                        
+                        // İlişkili kelimeler listesinde mi?
+                        if (is_array($relatedWords)) {
+                            foreach ($relatedWords as $relWord) {
+                                $relWordText = is_array($relWord) ? ($relWord['word'] ?? '') : $relWord;
+                                if (strtolower($relWordText) == strtolower($word)) {
+                                    $validRelations++;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Eş anlamlılar listesinde mi?
+                        $synonyms = $this->getSynonyms($mainWord);
+                        if (array_key_exists(strtolower($word), $synonyms)) {
+                            $validRelations++;
+                        }
+                        
+                        // Zıt anlamlılar listesinde mi?
+                        $antonyms = $this->getAntonyms($mainWord);
+                        if (array_key_exists(strtolower($word), $antonyms)) {
+                            $validRelations++;
+                        }
+                    }
+                }
+            }
+            
+            // Geçerli ilişki oranını hesapla
+            if ($totalRelations > 0) {
+                $relationRatio = $validRelations / $totalRelations;
+                $accuracy += $relationRatio * 0.2; // İlişki oranına göre bonus (max 0.2)
+            }
+            
+            // Cümle uzunluğuna göre bonus/ceza
+            $wordCount = count($words);
+            if ($wordCount < 3) {
+                $accuracy -= 0.1; // Çok kısa cümleler için ceza
+            } else if ($wordCount > 15) {
+                $accuracy -= 0.1; // Çok uzun cümleler için ceza
+            }
+            
+            // Cümle yapısal kontroller
+            if (substr($sentence, -1) == '.' || substr($sentence, -1) == '?' || substr($sentence, -1) == '!') {
+                $accuracy += 0.05; // Noktalama doğruysa bonus
+            }
+            
+            if (mb_strtoupper(mb_substr($sentence, 0, 1)) === mb_substr($sentence, 0, 1)) {
+                $accuracy += 0.05; // İlk harf büyükse bonus
+            }
+            
+            return min(1.0, max(0.0, $accuracy)); // 0-1 arasında sınırla
+            
+        } catch (\Exception $e) {
+            \Log::error('Cümle doğruluk hesaplama hatası: ' . $e->getMessage());
+            return 0.3; // Hata durumunda düşük bir değer döndür
+        }
+    }
+    
+    /**
      * Kelimelerin anlam ilişkilerini kullanarak akıllı cümleler oluştur
      * Sinonim ve antonim kullanımına öncelik verir
+     * Oluşturulan cümlelerin doğruluğunu kontrol eder
      *
      * @param string $mainWord Ana kelime
      * @param bool $saveToDatabase Veritabanına kaydedilsin mi
      * @param int $count Kaç cümle oluşturulacak
+     * @param float $minAccuracy Minimum doğruluk puanı (0-1 arası)
      * @return array Oluşturulan cümleler
      */
-    public function generateSmartSentences($mainWord, $saveToDatabase = true, $count = 3)
+    public function generateSmartSentences($mainWord, $saveToDatabase = true, $count = 3, $minAccuracy = 0.6)
     {
         if (!$this->isValidWord($mainWord)) {
             return [];
@@ -1080,40 +1182,102 @@ class WordRelations
         
         Log::info("$mainWord kelimesi için akıllı cümleler oluşturuluyor");
         
+        // Kelime veritabanında var mı kontrol et
+        $wordExists = \App\Models\AIData::where('word', $mainWord)->exists();
+        if (!$wordExists) {
+            Log::warning("$mainWord kelimesi veritabanında bulunamadı");
+            // Fallback olarak basit bir cümle oluştur
+            return [$mainWord . " kelimesi hakkında bilgi toplanıyor."];
+        }
+        
         $sentences = [];
         $attempts = 0;
-        $maxAttempts = $count * 3; // Her başarılı cümle için en fazla 3 deneme
+        $maxAttempts = $count * 5; // Her başarılı cümle için en fazla 5 deneme
+        
+        // Mutlaka bir şekilde cümle oluşturmaya çalış
+        if (empty($sentences) && $attempts < $maxAttempts) {
+            // Eş anlamlı ile bir cümle dene
+            $sentence = $this->createSentenceWithSynonyms($mainWord);
+            if (!empty($sentence) && !in_array($sentence, $sentences)) {
+                // Cümle doğruluğunu kontrol et
+                $accuracy = $this->calculateSentenceAccuracy($sentence, $mainWord);
+                if ($accuracy >= $minAccuracy) {
+                    $sentences[] = $sentence;
+                    if ($saveToDatabase) {
+                        $this->saveSentence($mainWord, $sentence, 'generated', $accuracy);
+                    }
+                }
+            }
+        }
+        
+        if (empty($sentences) && $attempts < $maxAttempts) {
+            // Zıt anlamlı ile bir cümle dene
+            $sentence = $this->createSentenceWithAntonyms($mainWord);
+            if (!empty($sentence) && !in_array($sentence, $sentences)) {
+                // Cümle doğruluğunu kontrol et
+                $accuracy = $this->calculateSentenceAccuracy($sentence, $mainWord);
+                if ($accuracy >= $minAccuracy) {
+                    $sentences[] = $sentence;
+                    if ($saveToDatabase) {
+                        $this->saveSentence($mainWord, $sentence, 'generated', $accuracy);
+                    }
+                }
+            }
+        }
         
         while (count($sentences) < $count && $attempts < $maxAttempts) {
             $attempts++;
             
             // Rastgele bir cümle stratejisi seç
-            $strategy = mt_rand(1, 3);
+            $strategy = mt_rand(1, 5);
             $sentence = '';
             
             switch ($strategy) {
                 case 1:
-                    // Eş anlamlı kullanarak cümle oluştur
+                case 2:
+                    // Eş anlamlı kullanarak cümle oluştur (daha sık olsun)
                     $sentence = $this->createSentenceWithSynonyms($mainWord);
                     break;
-                case 2:
+                case 3:
                     // Zıt anlamlı kullanarak cümle oluştur
                     $sentence = $this->createSentenceWithAntonyms($mainWord);
                     break;
-                case 3:
-                    // İlişkili kelimelerle cümle oluştur
+                case 4:
+                case 5:
+                    // İlişkili kelimelerle cümle oluştur (daha sık olsun)
                     $sentence = $this->createSentenceWithRelatedWords($mainWord);
                     break;
             }
             
             // Cümle geçerli mi kontrol et
             if (!empty($sentence) && $this->isValidSentence($sentence) && !in_array($sentence, $sentences)) {
-                $sentences[] = $sentence;
+                // Cümle doğruluğunu kontrol et
+                $accuracy = $this->calculateSentenceAccuracy($sentence, $mainWord);
                 
-                // Veritabanına kaydet
-                if ($saveToDatabase) {
-                    $this->saveSentence($mainWord, $sentence, 'generated');
+                if ($accuracy >= $minAccuracy) {
+                    $sentences[] = $sentence;
+                    
+                    // Veritabanına kaydet
+                    if ($saveToDatabase) {
+                        $this->saveSentence($mainWord, $sentence, 'generated', $accuracy);
+                    }
+                } else {
+                    Log::info("$mainWord için oluşturulan cümle doğruluk eşiğini geçemedi: $sentence (Doğruluk: $accuracy)");
                 }
+            }
+        }
+        
+        // Hala cümle oluşturulamamışsa fallback cümleler kullan
+        if (empty($sentences)) {
+            $fallbackSentences = [
+                "$mainWord çok önemli bir kelimedir.",
+                "$mainWord hakkında bilgi toplamaya devam ediyorum.",
+                "$mainWord kelimesi Türkçe'de yaygın olarak kullanılır."
+            ];
+            $sentences[] = $fallbackSentences[array_rand($fallbackSentences)];
+            
+            if ($saveToDatabase) {
+                $this->saveSentence($mainWord, $sentences[0], 'generated_fallback', 0.4);
             }
         }
         
@@ -1144,7 +1308,10 @@ class WordRelations
             "$mainWord kelimesi $synonym ile aynı anlama gelir.",
             "$mainWord ve $synonym kelimelerinin anlamları benzerdir.",
             "$mainWord yerine $synonym kelimesi de kullanılabilir.",
-            "$mainWord, $synonym anlamını taşır."
+            "$mainWord, $synonym anlamını taşır.",
+            "$mainWord kelimesinin eş anlamlısı $synonym kelimesidir.",
+            "Türkçe'de $mainWord kelimesi yerine $synonym da kullanılır.",
+            "$mainWord ile $synonym aynı anlama gelen iki kelimedir."
         ];
         
         return $templates[array_rand($templates)];
@@ -1236,54 +1403,66 @@ class WordRelations
     /**
      * Cümleyi veritabanına kaydet
      * 
-     * @param string $word Cümlenin ana kelimesi
+     * @param string $word Kelime
      * @param string $sentence Cümle
-     * @param string $source Cümlenin kaynağı
-     * @return bool Başarılı mı
+     * @param string $source Kaynak
+     * @param float $accuracy Doğruluk puanı
+     * @return bool Başarı durumu
      */
-    public function saveSentence($word, $sentence, $source = 'generated')
+    public function saveSentence($word, $sentence, $source = 'generated', $accuracy = 0.5)
     {
-        if (empty($word) || empty($sentence)) {
-            return false;
-        }
-        
         try {
-            // Mevcut tanıma örnek olarak ekle
-            $definition = WordDefinition::where('word', $word)
-                ->orderBy('created_at', 'desc')
-                ->first();
-                
-            if ($definition) {
-                $examples = json_decode($definition->examples ?: '[]', true) ?: [];
-                
-                // Aynı cümle yoksa ekle
-                if (!in_array($sentence, $examples)) {
-                    $examples[] = $sentence;
-                    $definition->examples = json_encode($examples);
-                    $definition->save();
-                    
-                    Log::info("Yeni cümle tanıma eklendi: $sentence");
+            // Kelime verilerini al veya oluştur
+            $aiData = \App\Models\AIData::firstOrNew(['word' => $word]);
+            
+            // Örnekler listesini al
+            $examples = json_decode($aiData->usage_examples ?? '[]', true) ?: [];
+            
+            // Cümlenin zaten kayıtlı olup olmadığını kontrol et
+            foreach ($examples as $example) {
+                if (is_array($example) && isset($example['text']) && $example['text'] === $sentence) {
+                    // Zaten kayıtlı, güncelle
+                    $example['accuracy'] = $accuracy;
+                    $example['updated_at'] = now()->toDateTimeString();
                     return true;
+                } else if (is_string($example) && $example === $sentence) {
+                    // Eski formatta kayıtlı, yeni formata dönüştür
+                    $examples = array_filter($examples, function($e) use ($sentence) {
+                        return $e !== $sentence;
+                    });
+                    break;
                 }
-            } else {
-                // Tanım yoksa, yeni bir tanım oluştur
-                $newDefinition = new WordDefinition();
-                $newDefinition->word = $word;
-                $newDefinition->definition = "Otomatik oluşturulmuş tanım";
-                $newDefinition->source = $source;
-                $newDefinition->language = $this->language;
-                $newDefinition->verified = false;
-                $newDefinition->examples = json_encode([$sentence]);
-                $newDefinition->save();
-                
-                Log::info("Yeni tanım ve cümle eklendi: $sentence");
-                return true;
             }
+            
+            // Yeni formatta ekle
+            $examples[] = [
+                'text' => $sentence,
+                'source' => $source,
+                'accuracy' => $accuracy,
+                'created_at' => now()->toDateTimeString(),
+                'updated_at' => now()->toDateTimeString()
+            ];
+            
+            // Örnekleri güncelle
+            $aiData->usage_examples = json_encode($examples);
+            
+            // Eğer yeni oluşturuluyorsa diğer alanları da doldur
+            if (!$aiData->exists) {
+                $aiData->sentence = $sentence;
+                $aiData->category = 'genel';
+                $aiData->context = 'Otomatik oluşturuldu';
+                $aiData->language = 'tr';
+                $aiData->frequency = 1;
+                $aiData->confidence = $accuracy;
+            }
+            
+            // Kaydet
+            $aiData->save();
+            
+            return true;
         } catch (\Exception $e) {
-            Log::error("Cümle kaydetme hatası: " . $e->getMessage());
+            \Log::error('Cümle kaydetme hatası: ' . $e->getMessage());
             return false;
         }
-        
-        return false;
     }
 }
